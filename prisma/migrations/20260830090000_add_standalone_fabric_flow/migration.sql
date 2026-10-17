@@ -1,0 +1,62 @@
+CREATE TYPE "FabricFlowStatus" AS ENUM (
+  'PURCHASED',
+  'KNITTING',
+  'DYEING',
+  'COMPACTING',
+  'AT_OFFICE',
+  'DELIVERED'
+);
+
+CREATE TABLE "FabricProductionFlow" (
+  "id" TEXT NOT NULL,
+  "flowNo" TEXT NOT NULL,
+  "status" "FabricFlowStatus" NOT NULL DEFAULT 'PURCHASED',
+  "purchaseDate" TIMESTAMP(3) NOT NULL,
+  "piNo" TEXT NOT NULL,
+  "partyDetails" TEXT NOT NULL,
+  "millDetails" TEXT NOT NULL,
+  "yarnCount" TEXT NOT NULL,
+  "bagCount" INTEGER NOT NULL,
+  "purchasedWeightKg" DECIMAL(14,3) NOT NULL,
+  "yarnRatePerKg" DECIMAL(14,2) NOT NULL DEFAULT 0,
+  "purchaseOtherCost" DECIMAL(14,2) NOT NULL DEFAULT 0,
+  "deliveryPlace" TEXT NOT NULL,
+  "knittingDate" TIMESTAMP(3),
+  "knittingPiNo" TEXT,
+  "knittingPartyDetails" TEXT,
+  "knittingMillDetails" TEXT,
+  "yarnReceivedKg" DECIMAL(14,3),
+  "dailyProductivityKg" DECIMAL(14,3),
+  "knittingDeliveryKg" DECIMAL(14,3),
+  "knittingExpense" DECIMAL(14,2) NOT NULL DEFAULT 0,
+  "dyeingDeliveryKg" DECIMAL(14,3),
+  "dyeingDate" TIMESTAMP(3),
+  "dyeingPiNo" TEXT,
+  "dyeingPartyDetails" TEXT,
+  "dyeingMillDetails" TEXT,
+  "fabricReceivedKg" DECIMAL(14,3),
+  "color" TEXT,
+  "dyeingCount" TEXT,
+  "gg" TEXT,
+  "ll" TEXT,
+  "rollCount" INTEGER,
+  "dyeingOutputWeightKg" DECIMAL(14,3),
+  "dyeingExpense" DECIMAL(14,2) NOT NULL DEFAULT 0,
+  "compactingDeliveryKg" DECIMAL(14,3),
+  "compactingDate" TIMESTAMP(3),
+  "compactingReceivedKg" DECIMAL(14,3),
+  "officeDeliveryKg" DECIMAL(14,3),
+  "compactingExpense" DECIMAL(14,2) NOT NULL DEFAULT 0,
+  "finalDate" TIMESTAMP(3),
+  "finalDeliveredKg" DECIMAL(14,3),
+  "collectedAmount" DECIMAL(14,2) NOT NULL DEFAULT 0,
+  "otherExpense" DECIMAL(14,2) NOT NULL DEFAULT 0,
+  "notes" TEXT,
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" TIMESTAMP(3) NOT NULL,
+  CONSTRAINT "FabricProductionFlow_pkey" PRIMARY KEY ("id")
+);
+
+CREATE UNIQUE INDEX "FabricProductionFlow_flowNo_key" ON "FabricProductionFlow"("flowNo");
+CREATE INDEX "FabricProductionFlow_status_purchaseDate_idx" ON "FabricProductionFlow"("status", "purchaseDate");
+CREATE INDEX "FabricProductionFlow_piNo_idx" ON "FabricProductionFlow"("piNo");

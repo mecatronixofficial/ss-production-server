@@ -1,0 +1,1001 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  SUPERADMIN
+  ADMIN
+  MANAGER
+  STAFF
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  LOCKED
+}
+
+enum StockCategory {
+  RAW_MATERIAL
+  YARN
+  GREY_FABRIC
+  DYED_FABRIC
+  CHEMICAL
+  FINISHED_FABRIC
+  PACKING
+}
+
+enum StockTxnType {
+  OPENING
+  PURCHASE_IN
+  PRODUCTION_IN
+  PRODUCTION_ISSUE
+  KNITTING_ISSUE
+  KNITTING_RETURN
+  GREY_FABRIC_IN
+  DYEING_ISSUE
+  DYEING_OUTPUT
+  FINISHING_OUTPUT
+  QC_APPROVED
+  DISPATCH_OUT
+  RETURN_IN
+  TRANSFER_IN
+  TRANSFER_OUT
+  WASTE
+  ADJUSTMENT
+}
+
+enum NotificationPriority {
+  LOW
+  NORMAL
+  HIGH
+  CRITICAL
+}
+
+enum NotificationType {
+  JOB_ASSIGNED
+  JOB_STARTED
+  JOB_COMPLETED
+  QC_FAILED
+  QC_PASSED
+  HIGH_WASTAGE
+  LOW_STOCK
+  STOCK_DIFFERENCE
+  MACHINE_BREAKDOWN
+  MAINTENANCE_DUE
+  DELIVERY_DUE
+  DELIVERY_DELAYED
+  PAYMENT_DUE
+  ORDER_DUE
+  ORDER_READY
+  ORDER_COMPLETED
+  SYSTEM
+}
+
+enum MachineStatus {
+  RUNNING
+  IDLE
+  MAINTENANCE
+  BREAKDOWN
+  DISABLED
+}
+
+enum PurchaseOrderStatus {
+  ORDERED
+  PARTIALLY_RECEIVED
+  RECEIVED
+  CANCELLED
+  /// Partly received and closed short: the rest will not be delivered.
+  CLOSED
+}
+
+enum FabricFlowStatus {
+  PURCHASED
+  KNITTING
+  DYEING
+  COMPACTING
+  AT_OFFICE
+  DELIVERED
+}
+
+model User {
+  id               String           @id @default(uuid())
+  name             String
+  email            String           @unique
+  passwordHash     String
+  role             Role
+  status           UserStatus       @default(ACTIVE)
+  employeeId       String?          @unique
+  employee         Employee?        @relation(fields: [employeeId], references: [id])
+  refreshSessions  RefreshSession[]
+  notifications    Notification[]
+  createdAuditLogs AuditLog[]       @relation("AuditActor")
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+}
+
+model RefreshSession {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String
+  userAgent String?
+  ipAddress String?
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, expiresAt])
+  @@index([expiresAt])
+}
+
+model Supplier {
+  id               String             @id @default(uuid())
+  code             String             @unique
+  name             String
+  company          String?
+  contactPerson    String?
+  mobile           String?
+  email            String?
+  gst              String?
+  address          String?
+  materialCategory String?
+  paymentTerms     String?
+  openingBalance   Decimal            @default(0) @db.Decimal(14, 2)
+  active           Boolean            @default(true)
+  purchaseOrders   PurchaseOrder[]
+  /// Money paid to them (purchases) and received from them (sales); see MoneyTransaction.
+  moneyTxns        MoneyTransaction[]
+  sales            Sale[]
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+}
+
+/// A textile the business sells to: the Textiles list beside Distributors. Sales and money to and from a textile point
+/// here; older ones were matched by name when the list was created.
+model Textile {
+  id             String             @id @default(uuid())
+  /// TXT-00001, assigned on create.
+  code           String             @unique
+  name           String
+  /// The name in lower case with single spaces: one textile per name, however it is typed.
+  nameKey        String             @unique
+  contactPerson  String?
+  mobile         String?
+  email          String?
+  gst            String?
+  address        String?
+  city           String?
+  paymentTerms   String?
+  /// Most they may owe before new sales need a look (informational).
+  creditLimit    Decimal?           @db.Decimal(14, 2)
+  /// What they owed before the ERP; minus for an advance they had paid.
+  openingBalance Decimal            @default(0) @db.Decimal(14, 2)
+  notes          String?
+  active         Boolean            @default(true)
+  sales          Sale[]
+  moneyTxns      MoneyTransaction[]
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  @@index([active, name])
+}
+
+/// Outside mills that perform knitting, dyeing and/or compacting work (the "Mill Details" master).
+model Mill {
+  id              String   @id @default(uuid())
+  code            String   @unique
+  name            String
+  services        String
+  contactPerson   String?
+  mobile          String?
+  alternateMobile String?
+  email           String?
+  gst             String?
+  address         String?
+  city            String?
+  state           String?
+  paymentTerms    String?
+  notes           String?
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([active, name])
+}
+
+model Warehouse {
+  id               String                 @id @default(uuid())
+  code             String                 @unique
+  name             String
+  location         String?
+  active           Boolean                @default(true)
+  stockTxns        StockTransaction[]
+  purchaseReceipts PurchaseReceipt[]
+  purchaseOrders   PurchaseOrder[]
+  productionFlows  FabricProductionFlow[]
+  fabricDeliveries FabricFlowDelivery[]
+  knittingRuns     KnittingRun[]
+  knittingRunYarns KnittingRunYarn[]
+  sales            Sale[]
+  stockBills       StockBill[]
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+}
+
+model Employee {
+  id           String        @id @default(uuid())
+  code         String        @unique
+  name         String
+  mobile       String?
+  department   String
+  shift        String?
+  joiningDate  DateTime?
+  active       Boolean       @default(true)
+  user         User?
+  machines     Machine[]     @relation("MachineOperator")
+  knittingRuns KnittingRun[] @relation("KnittingRunOperator")
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+}
+
+model Machine {
+  id           String        @id @default(uuid())
+  code         String        @unique
+  name         String
+  department   String
+  type         String?
+  /// Most yarn one load can take (240 KG unless set otherwise for the machine).
+  capacityKg   Decimal?      @db.Decimal(12, 3)
+  /// Knitting charge per KG of fabric; each run starts with it and can change it.
+  ratePerKg    Decimal?      @db.Decimal(12, 2)
+  manufacturer String?
+  purchaseDate DateTime?
+  status       MachineStatus @default(IDLE)
+  operatorId   String?
+  operator     Employee?     @relation("MachineOperator", fields: [operatorId], references: [id])
+  knittingRuns KnittingRun[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+}
+
+/// The two 12-hour shifts machines run in: Day 9 AM–9 PM, Night 9 PM–9 AM.
+enum KnittingShift {
+  DAY
+  NIGHT
+}
+
+enum KnittingRunStatus {
+  RUNNING
+  FINISHED
+}
+
+/// One load of yarn knitted on a machine. The fabric goes into a warehouse as grey fabric under `runNo`.
+model KnittingRun {
+  id               String                @id @default(uuid())
+  /// SS-2026-NNN: the run's code, and the grey fabric's item code in stock.
+  runNo            String                @unique
+  machineId        String
+  machine          Machine               @relation(fields: [machineId], references: [id])
+  status           KnittingRunStatus     @default(RUNNING)
+  fabricType       String?
+  startedAt        DateTime
+  startShift       KnittingShift
+  finishedAt       DateTime?
+  finishShift      KnittingShift?
+  operatorId       String?
+  operator         Employee?             @relation("KnittingRunOperator", fields: [operatorId], references: [id])
+  yarnKg           Decimal               @db.Decimal(14, 3)
+  yarnCost         Decimal               @db.Decimal(14, 2)
+  /// Knitting charge per KG of fabric.
+  ratePerKg        Decimal               @default(0) @db.Decimal(12, 2)
+  outputKg         Decimal?              @db.Decimal(14, 3)
+  rollCount        Int?
+  knittingCharge   Decimal?              @db.Decimal(14, 2)
+  warehouseId      String?
+  warehouse        Warehouse?            @relation(fields: [warehouseId], references: [id])
+  stockTxnId       String?
+  notes            String?
+  createdById      String?
+  yarns            KnittingRunYarn[]
+  productionFlowId String?
+  productionFlow   FabricProductionFlow? @relation(fields: [productionFlowId], references: [id])
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+
+  @@index([machineId, status])
+  @@index([productionFlowId, status])
+  @@index([startedAt])
+}
+
+/// A yarn loaded on a run (a run knits one, two or three yarns together).
+model KnittingRunYarn {
+  id          String        @id @default(uuid())
+  runId       String
+  run         KnittingRun   @relation(fields: [runId], references: [id], onDelete: Cascade)
+  itemCode    String
+  itemName    String
+  category    StockCategory
+  warehouseId String
+  warehouse   Warehouse     @relation(fields: [warehouseId], references: [id])
+  lotNo       String?
+  kg          Decimal       @db.Decimal(14, 3)
+  ratePerKg   Decimal       @db.Decimal(12, 2)
+  issueTxnId  String?
+
+  @@index([runId])
+  @@index([itemCode])
+}
+
+model YarnStockLot {
+  id            String   @id @default(uuid())
+  lotNo         String   @unique
+  yarnType      String
+  yarnCount     String
+  color         String?
+  coneCount     Int      @default(0)
+  netWeightKg   Decimal  @db.Decimal(14, 3)
+  warehouseCode String
+  rack          String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model DyeRecipe {
+  id         String          @id @default(uuid())
+  name       String
+  color      String
+  shade      String?
+  fabricType String
+  items      DyeRecipeItem[]
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+}
+
+model Chemical {
+  id          String          @id @default(uuid())
+  code        String          @unique
+  name        String
+  unit        String
+  minStock    Decimal         @default(0) @db.Decimal(14, 3)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  recipeItems DyeRecipeItem[]
+}
+
+model DyeRecipeItem {
+  id         String    @id @default(uuid())
+  recipeId   String
+  recipe     DyeRecipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  chemicalId String
+  chemical   Chemical  @relation(fields: [chemicalId], references: [id])
+  qtyPerKg   Decimal   @db.Decimal(14, 6)
+  unit       String
+}
+
+model PurchaseOrder {
+  id           String              @id @default(uuid())
+  poNo         String              @unique
+  supplierId   String
+  supplier     Supplier            @relation(fields: [supplierId], references: [id])
+  orderDate    DateTime            @default(now())
+  expectedDate DateTime?
+  status       PurchaseOrderStatus @default(ORDERED)
+  /// Where the material is to be delivered; that warehouse's page shows it as waiting to be received.
+  /// Null on POs created before destinations existed.
+  warehouseId  String?
+  warehouse    Warehouse?          @relation(fields: [warehouseId], references: [id])
+  items        PurchaseOrderItem[]
+  receipts     PurchaseReceipt[]
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  @@index([status, expectedDate])
+  @@index([supplierId])
+  @@index([warehouseId, status])
+}
+
+model PurchaseOrderItem {
+  id              String                @id @default(uuid())
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder         @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  /// Given on the line's first receipt from the SS-<year>-<n> counter (shared with Track batches), so every
+  /// purchased item has its own code; later receipts of the line keep it. Null until then.
+  itemCode        String?
+  itemName        String
+  /// The stock this line becomes when received (yarn, raw material, chemical…), chosen when ordering.
+  /// Null on lines ordered before it existed; a receipt then gives the category.
+  category        StockCategory?
+  quantity        Decimal               @db.Decimal(14, 3)
+  unit            String
+  rate            Decimal               @db.Decimal(14, 2)
+  receiptItems    PurchaseReceiptItem[]
+}
+
+model PurchaseReceipt {
+  id              String                @id @default(uuid())
+  receiptNo       String                @unique
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder         @relation(fields: [purchaseOrderId], references: [id])
+  warehouseId     String
+  warehouse       Warehouse             @relation(fields: [warehouseId], references: [id])
+  category        StockCategory
+  lotNo           String?
+  /// The distributor's delivery challan / invoice number that came with the material, printed on the received challan.
+  challanNo       String?
+  vehicleNo       String?
+  /// Remarks at receipt, e.g. "2 bags torn", printed on the received challan.
+  notes           String?
+  receivedAt      DateTime              @default(now())
+  receivedById    String?
+  items           PurchaseReceiptItem[]
+  createdAt       DateTime              @default(now())
+
+  @@index([purchaseOrderId, receivedAt])
+  @@index([warehouseId, category])
+}
+
+model PurchaseReceiptItem {
+  id                  String            @id @default(uuid())
+  purchaseReceiptId   String
+  purchaseReceipt     PurchaseReceipt   @relation(fields: [purchaseReceiptId], references: [id], onDelete: Cascade)
+  purchaseOrderItemId String
+  purchaseOrderItem   PurchaseOrderItem @relation(fields: [purchaseOrderItemId], references: [id])
+  quantity            Decimal           @db.Decimal(14, 3)
+
+  @@unique([purchaseReceiptId, purchaseOrderItemId])
+  @@index([purchaseOrderItemId])
+}
+
+/// How money moved. BANK is a transfer (NEFT / RTGS / IMPS / deposit); a cheque counts only once it clears.
+enum PaymentMode {
+  CASH
+  UPI
+  BANK
+  CHEQUE
+}
+
+enum MoneyAccountType {
+  CASH
+  BANK
+  UPI
+}
+
+/// RECEIPT: money in from a party. PAYMENT: money out to a party. TRANSFER: between own accounts (cash put in the bank…).
+enum MoneyTxnKind {
+  RECEIPT
+  PAYMENT
+  TRANSFER
+}
+
+/// Distributors are Supplier records; textiles have no master and are known by name (as on sales); OTHER is anyone else.
+enum MoneyPartyType {
+  DISTRIBUTOR
+  TEXTILE
+  OTHER
+}
+
+/// A received cheque is PENDING, then DEPOSITED into a bank, then CLEARED or BOUNCED. An issued cheque skips DEPOSITED.
+enum ChequeStatus {
+  PENDING
+  DEPOSITED
+  CLEARED
+  BOUNCED
+}
+
+/// Where the money is kept: cash in hand, a bank account, or a UPI / wallet account.
+model MoneyAccount {
+  id             String             @id @default(uuid())
+  type           MoneyAccountType
+  name           String
+  bankName       String?
+  branch         String?
+  ifsc           String?
+  accountHolder  String?
+  /// AES-256-GCM ciphertext of the account number (src/common/crypto.ts). Only the last 4 digits ever leave the server,
+  /// except to a super admin who asks to see it (audited).
+  accountNoEnc   String?
+  accountNoLast4 String?
+  upiId          String?
+  /// Balance when the account was added to the ERP.
+  openingBalance Decimal            @default(0) @db.Decimal(14, 2)
+  notes          String?
+  active         Boolean            @default(true)
+  createdById    String?
+  txns           MoneyTransaction[] @relation("MoneyTxnAccount")
+  transfersIn    MoneyTransaction[] @relation("MoneyTxnToAccount")
+  expenses       Expense[]
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  @@index([active, type])
+}
+
+/// Every rupee in or out: receipts from parties (against a sale bill or on account), payments to parties, and transfers
+/// between own accounts. Entries are never deleted; a wrong one is cancelled with a reason and stops counting.
+/// An entry counts toward balances when it is not cancelled and is not a cheque, or is a cleared cheque.
+model MoneyTransaction {
+  id            String          @id @default(uuid())
+  /// RCP-2026-000001 (receipt), PAY-2026-000001 (payment) or TRF-2026-000001 (transfer).
+  txnNo         String          @unique
+  kind          MoneyTxnKind
+  txnDate       DateTime
+  mode          PaymentMode
+  amount        Decimal         @db.Decimal(14, 2)
+  /// The account the money came into (receipt) or left (payment, transfer). A received cheque has none until deposited.
+  /// Null on payments recorded before accounts existed.
+  accountId     String?
+  account       MoneyAccount?   @relation("MoneyTxnAccount", fields: [accountId], references: [id], onDelete: Restrict)
+  /// Transfers only: the account the money went into.
+  toAccountId   String?
+  toAccount     MoneyAccount?   @relation("MoneyTxnToAccount", fields: [toAccountId], references: [id], onDelete: Restrict)
+  partyType     MoneyPartyType?
+  supplierId    String?
+  supplier      Supplier?       @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  textileId     String?
+  textile       Textile?        @relation(fields: [textileId], references: [id], onDelete: Restrict)
+  /// The distributor's name (a copy) or the textile / other party's name. A textile's account is everything under its name.
+  partyName     String?
+  /// A receipt against one sale bill. Receipts without one are on account (an advance until bills use it up).
+  saleId        String?
+  sale          Sale?           @relation(fields: [saleId], references: [id], onDelete: SetNull)
+  /// UTR / UPI transaction id / bank reference.
+  referenceNo   String?
+  chequeNo      String?
+  chequeDate    DateTime?
+  /// The bank a cheque is drawn on (the party's bank for a received cheque).
+  chequeBank    String?
+  chequeStatus  ChequeStatus?
+  depositedAt   DateTime?
+  clearedAt     DateTime?
+  bouncedAt     DateTime?
+  bounceReason  String?
+  notes         String?
+  createdById   String?
+  cancelledAt   DateTime?
+  cancelledById String?
+  cancelReason  String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@index([kind, txnDate])
+  @@index([accountId, txnDate])
+  @@index([toAccountId])
+  @@index([supplierId, kind])
+  @@index([textileId, kind])
+  @@index([partyType, partyName])
+  @@index([saleId])
+  @@index([mode, chequeStatus])
+}
+
+model Expense {
+  id            String        @id @default(uuid())
+  expenseNo     String        @unique
+  expenseDate   DateTime      @default(now())
+  category      String
+  subcategory   String?
+  description   String?
+  amount        Decimal       @db.Decimal(14, 2)
+  paymentMode   String
+  /// The cash / bank / UPI account it was paid from; null on expenses recorded before accounts existed.
+  accountId     String?
+  account       MoneyAccount? @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  branch        String?
+  attachmentKey String?
+  createdById   String?
+  /// A wrong expense is cancelled with a reason (kept on record, counted nowhere), never deleted.
+  cancelledAt   DateTime?
+  cancelledById String?
+  cancelReason  String?
+  createdAt     DateTime      @default(now())
+
+  @@index([expenseDate])
+  @@index([accountId])
+}
+
+model StockTransaction {
+  id            String        @id @default(uuid())
+  category      StockCategory
+  txnType       StockTxnType
+  itemCode      String
+  itemName      String
+  lotNo         String?
+  warehouseId   String
+  warehouse     Warehouse     @relation(fields: [warehouseId], references: [id])
+  quantityIn    Decimal       @default(0) @db.Decimal(14, 3)
+  quantityOut   Decimal       @default(0) @db.Decimal(14, 3)
+  unit          String        @default("KG")
+  referenceType String
+  referenceId   String
+  createdById   String?
+  notes         String?
+  /// The received / export bill this movement is on, once an admin has issued it.
+  stockBillId   String?
+  stockBill     StockBill?    @relation(fields: [stockBillId], references: [id], onDelete: SetNull)
+  /// Set when an admin cleared the movement as needing no bill (old movements from before bills); it no longer counts as unbilled.
+  billWaivedAt  DateTime?
+  createdAt     DateTime      @default(now())
+
+  @@index([category, itemCode, warehouseId])
+  @@index([stockBillId])
+  @@index([lotNo])
+  @@index([referenceType, referenceId])
+  @@index([createdAt])
+}
+
+model Notification {
+  id            String               @id @default(uuid())
+  userId        String
+  user          User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title         String
+  message       String
+  type          NotificationType
+  priority      NotificationPriority @default(NORMAL)
+  referenceType String?
+  referenceId   String?
+  isRead        Boolean              @default(false)
+  readAt        DateTime?
+  createdAt     DateTime             @default(now())
+
+  @@index([userId, isRead, createdAt])
+}
+
+model AuditLog {
+  id            String   @id @default(uuid())
+  actorId       String?
+  actor         User?    @relation("AuditActor", fields: [actorId], references: [id])
+  action        String
+  module        String
+  entity        String
+  entityId      String?
+  previousValue Json?
+  newValue      Json?
+  ipAddress     String?
+  userAgent     String?
+  createdAt     DateTime @default(now())
+
+  @@index([module, createdAt])
+  @@index([actorId, createdAt])
+}
+
+model SystemSetting {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+enum FabricSource {
+  PURCHASE
+  STOCK
+}
+
+enum KnittingMillType {
+  OWN
+  OTHER
+}
+
+enum ProcessDeliveryDestination {
+  NEXT_PROCESS
+  WAREHOUSE
+}
+
+/// Standalone material flow for the owner's yarn-to-finished-fabric business (the Production page).
+///
+/// A batch starts when knitting takes yarn out of a warehouse by its item code; the batch is known by that
+/// code (SS-2026-003, or SS-2026-003-2 for a second batch from the same yarn). Older batches started with
+/// a purchase entry (PI, party, mill) and keep those fields.
+model FabricProductionFlow {
+  id     String           @id @default(uuid())
+  /// Batch code, e.g. SS-2026-003, written on the bags and followed through every process.
+  flowNo String           @unique
+  status FabricFlowStatus @default(PURCHASED)
+  source FabricSource     @default(PURCHASE)
+
+  /// The yarn taken from stock: its item code, warehouse and lot, and the stock movement that took it out.
+  yarnItemCode    String?
+  yarnWarehouseId String?
+  yarnWarehouse   Warehouse? @relation(fields: [yarnWarehouseId], references: [id])
+  yarnLotNo       String?
+  yarnIssueTxnId  String?
+  /// Fabric identity produced from this yarn allocation. New flows use YARN-CODE-D1, -D2, ...
+  fabricType      String?
+  fabricDiameter  String?
+  /// Fabric weight in grams per square metre, e.g. "180" (optional, as typed).
+  fabricGsm       String?
+
+  /// Knitting start date for batches started from stock; the purchase date on older batches.
+  purchaseDate      DateTime
+  piNo              String?
+  partyDetails      String?
+  millDetails       String?
+  yarnCount         String
+  bagCount          Int
+  purchasedWeightKg Decimal  @db.Decimal(14, 3)
+  yarnRatePerKg     Decimal  @default(0) @db.Decimal(14, 2)
+  purchaseOtherCost Decimal  @default(0) @db.Decimal(14, 2)
+  deliveryPlace     String?
+
+  knittingDate                   DateTime?
+  /// Own-mill batches are internal machine tasks; other-mill batches are recorded manually by the office.
+  knittingMillType               KnittingMillType           @default(OWN)
+  knittingPiNo                   String?
+  knittingPartyDetails           String?
+  knittingMillDetails            String?
+  knittingYarnStock              String?
+  knittingFabricStock            String?
+  knittingGg                     String?
+  knittingLl                     String?
+  yarnReceivedKg                 Decimal?                   @db.Decimal(14, 3)
+  dailyProductivityKg            Decimal?                   @db.Decimal(14, 3)
+  knittingDeliveryKg             Decimal?                   @db.Decimal(14, 3)
+  knittingExpense                Decimal                    @default(0) @db.Decimal(14, 2)
+  dyeingDeliveryKg               Decimal?                   @db.Decimal(14, 3)
+  /// Knitting is started (knittingDate), then finished: bags, total weight (knittingDeliveryKg, which goes on to dyeing), place.
+  knittingExpectedFinishDate     DateTime?
+  knittingFinishedAt             DateTime?
+  knittingBagCount               Int?
+  knittingDeliveryPlace          String?
+  knittingDestination            ProcessDeliveryDestination @default(NEXT_PROCESS)
+  knittingDestinationWarehouseId String?
+  knittingNotes                  String?
+  attachments                    FabricFlowAttachment[]
+  /// Where the finished fabric went: parties and / or warehouses. `finalDeliveredKg`, `collectedAmount`,
+  /// `otherExpense` and `finalDate` are their totals; batches delivered before this keep only the totals.
+  deliveries                     FabricFlowDelivery[]
+  expenses                       FabricFlowExpense[]
+  knittingRuns                   KnittingRun[]
+
+  /// Dyeing is started (dyeingDate: party, mill, fabric received), then completed (dyeingFinishedAt: output, delivery).
+  dyeingDate                   DateTime?
+  dyeingFinishedAt             DateTime?
+  dyeingIssueTxnId             String?
+  dyeingPiNo                   String?
+  dyeingPartyDetails           String?
+  dyeingMillDetails            String?
+  fabricReceivedKg             Decimal?                   @db.Decimal(14, 3)
+  dyeingGreyWeightKg           Decimal?                   @db.Decimal(14, 3)
+  color                        String?
+  dyeingCount                  String?
+  gg                           String?
+  ll                           String?
+  rollCount                    Int?
+  dyeingOutputWeightKg         Decimal?                   @db.Decimal(14, 3)
+  dyeingExpense                Decimal                    @default(0) @db.Decimal(14, 2)
+  dyeingNotes                  String?
+  compactingDeliveryKg         Decimal?                   @db.Decimal(14, 3)
+  dyeingDestination            ProcessDeliveryDestination @default(NEXT_PROCESS)
+  dyeingDestinationWarehouseId String?
+
+  /// Compacting is started (compactingDate: party, mill, inward), then completed (compactingFinishedAt: compacted weight).
+  compactingDate         DateTime?
+  compactingFinishedAt   DateTime?
+  compactingIssueTxnId   String?
+  /// Each process has its own party and mill (knitting…, dyeing…, compacting…).
+  compactingPartyDetails String?
+  compactingMillDetails  String?
+  compactingInwardNo     String?
+  compactingReceivedKg   Decimal?  @db.Decimal(14, 3)
+  compactingOutwardNo    String?
+  officeDeliveryKg       Decimal?  @db.Decimal(14, 3)
+  compactingExpense      Decimal   @default(0) @db.Decimal(14, 2)
+  compactingNotes        String?
+
+  finalDate        DateTime?
+  finalDeliveredKg Decimal?  @db.Decimal(14, 3)
+  collectedAmount  Decimal   @default(0) @db.Decimal(14, 2)
+  otherExpense     Decimal   @default(0) @db.Decimal(14, 2)
+  notes            String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, purchaseDate])
+  @@index([knittingMillType, status])
+  @@index([yarnItemCode, createdAt])
+  @@index([piNo])
+}
+
+/// A dated operating cost recorded against one production batch.
+model FabricFlowExpense {
+  id          String               @id @default(uuid())
+  flowId      String
+  flow        FabricProductionFlow @relation(fields: [flowId], references: [id], onDelete: Cascade)
+  expenseDate DateTime
+  category    String
+  description String?
+  amount      Decimal              @db.Decimal(14, 2)
+  createdById String?
+  createdAt   DateTime             @default(now())
+
+  @@index([flowId, expenseDate])
+}
+
+enum FabricDeliveryDestination {
+  /// To a party (typed name). The value keeps its old name so stored deliveries stay valid.
+  CUSTOMER
+  WAREHOUSE
+}
+
+/// Finished fabric sent out of a batch: to a party (with the amount collected), or into a warehouse,
+/// where it becomes stock under the batch's code (`stockTxnId`).
+model FabricFlowDelivery {
+  id               String                    @id @default(uuid())
+  flowId           String
+  flow             FabricProductionFlow      @relation(fields: [flowId], references: [id], onDelete: Cascade)
+  deliveredAt      DateTime
+  destination      FabricDeliveryDestination
+  /// KNITTING/DYEING are process outputs awaiting warehouse receipt; FINAL is party/final warehouse delivery.
+  processStage     String                    @default("FINAL")
+  /// Who the fabric went to when delivered to a party (typed; there are no customer records).
+  partyName        String?
+  warehouseId      String?
+  warehouse        Warehouse?                @relation(fields: [warehouseId], references: [id])
+  weightKg         Decimal                   @db.Decimal(14, 3)
+  /// Collected from the party.
+  amount           Decimal                   @default(0) @db.Decimal(14, 2)
+  /// Transport or other cost of this delivery.
+  expense          Decimal                   @default(0) @db.Decimal(14, 2)
+  notes            String?
+  /// Fabric sent into a warehouse waits there until its staff receive it; only then is it stock (`stockTxnId`).
+  receivedAt       DateTime?
+  receivedWeightKg Decimal?                  @db.Decimal(14, 3)
+  receivedById     String?
+  stockTxnId       String?
+  createdById      String?
+  createdAt        DateTime                  @default(now())
+
+  @@index([flowId])
+  @@index([warehouseId, receivedAt])
+  @@index([processStage, receivedAt])
+}
+
+/// A document or photo attached to a production batch (e.g. the knitting delivery challan), kept in file storage.
+model FabricFlowAttachment {
+  id           String               @id @default(uuid())
+  flowId       String
+  flow         FabricProductionFlow @relation(fields: [flowId], references: [id], onDelete: Cascade)
+  /// The process it belongs to, e.g. KNITTING.
+  stage        String
+  objectKey    String
+  fileName     String
+  mimeType     String
+  sizeBytes    Int
+  uploadedById String?
+  createdAt    DateTime             @default(now())
+
+  @@index([flowId, stage])
+}
+
+/// Atomic per-prefix, per-year counters for human-readable document numbers
+/// (SO-2026-000001, INV-2026-000001, ...). See src/common/numbering.ts.
+model DocumentSequence {
+  key       String   @id
+  value     Int      @default(0)
+  updatedAt DateTime @updatedAt
+}
+
+/// Who a sale is to: a distributor from the Distributors master, or a textile (typed, details kept on the sale).
+enum SalePartyType {
+  DISTRIBUTOR
+  TEXTILE
+}
+
+/// PENDING: sent to the warehouse to verify and dispatch. REJECTED: the warehouse reported a problem.
+enum SaleStatus {
+  PENDING
+  REJECTED
+  DISPATCHED
+  CANCELLED
+}
+
+/// A sale of material from one warehouse: the bill (its number is the bill number), the vehicle it leaves on, and
+/// the warehouse's verification. Stock leaves the warehouse only when its staff dispatch it.
+model Sale {
+  id            String             @id @default(uuid())
+  /// Bill number, e.g. SAL-2026-000001.
+  saleNo        String             @unique
+  /// Delivery challan number, e.g. DC-2026-000001: given when the warehouse dispatches, printed on the delivery challan.
+  challanNo     String?            @unique
+  saleDate      DateTime
+  status        SaleStatus         @default(PENDING)
+  partyType     SalePartyType
+  /// Set when sold to a distributor; the party details below are a copy for the bill.
+  supplierId    String?
+  supplier      Supplier?          @relation(fields: [supplierId], references: [id])
+  /// Set when sold to a textile (from the Textiles list); the party details below are a copy for the bill.
+  textileId     String?
+  textile       Textile?           @relation(fields: [textileId], references: [id], onDelete: Restrict)
+  partyName     String
+  partyGst      String?
+  partyPhone    String?
+  partyAddress  String?
+  warehouseId   String
+  warehouse     Warehouse          @relation(fields: [warehouseId], references: [id])
+  vehicleNo     String?
+  driverName    String?
+  driverPhone   String?
+  transporter   String?
+  lrNo          String?
+  gstRate       Decimal            @default(5) @db.Decimal(5, 2)
+  /// Of the quantities sold; after dispatch, of the quantities actually dispatched.
+  subtotal      Decimal            @db.Decimal(14, 2)
+  gstAmount     Decimal            @db.Decimal(14, 2)
+  totalAmount   Decimal            @db.Decimal(14, 2)
+  notes         String?
+  createdById   String?
+  /// The warehouse's answer: who verified, when, and their remarks (or why it was sent back).
+  verifiedById  String?
+  dispatchedAt  DateTime?
+  dispatchNotes String?
+  rejectReason  String?
+  items         SaleItem[]
+  /// Money received against this bill.
+  receipts      MoneyTransaction[]
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  @@index([status, warehouseId])
+  @@index([saleDate])
+  @@index([supplierId])
+  @@index([textileId])
+}
+
+/// One stock position sold (item code, lot and unit in the sale's warehouse).
+model SaleItem {
+  id            String        @id @default(uuid())
+  saleId        String
+  sale          Sale          @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  category      StockCategory
+  itemCode      String
+  itemName      String
+  lotNo         String?
+  unit          String        @default("KG")
+  quantity      Decimal       @db.Decimal(14, 3)
+  /// What the warehouse actually sent; set on dispatch.
+  dispatchedQty Decimal?      @db.Decimal(14, 3)
+  rate          Decimal       @db.Decimal(14, 2)
+  amount        Decimal       @db.Decimal(14, 2)
+  /// The stock-out movement made on dispatch.
+  stockTxnId    String?
+
+  @@index([saleId])
+  @@index([itemCode])
+}
+
+/// RECEIVED: material that came into a warehouse. EXPORT: material that left it.
+enum StockBillKind {
+  RECEIVED
+  EXPORT
+}
+
+/// The bill for stock movements in one warehouse from one source (a purchase receipt, a sale, a batch, a godown
+/// entry…), in one direction. Issued by an admin; a cancelled bill frees its movements to be billed again.
+model StockBill {
+  id            String             @id @default(uuid())
+  /// RCV-2026-000001 or EXP-2026-000001.
+  billNo        String             @unique
+  kind          StockBillKind
+  warehouseId   String
+  warehouse     Warehouse          @relation(fields: [warehouseId], references: [id])
+  referenceType String
+  referenceId   String
+  /// Who it came from / went to, and the vehicle, as printed on the bill.
+  partyName     String?
+  vehicleNo     String?
+  notes         String?
+  createdById   String?
+  cancelledAt   DateTime?
+  cancelledById String?
+  cancelReason  String?
+  txns          StockTransaction[]
+  createdAt     DateTime           @default(now())
+
+  @@index([warehouseId, createdAt])
+  @@index([referenceType, referenceId])
+}
