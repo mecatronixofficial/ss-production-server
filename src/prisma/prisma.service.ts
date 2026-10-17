@@ -1,7 +1,8 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { Prisma, PrismaClient } from '@prisma/client';
 
-const DEFAULT_CONNECTION_LIMIT = 5;
+const DEFAULT_SERVER_CONNECTION_LIMIT = 5;
+const DEFAULT_SERVERLESS_CONNECTION_LIMIT = 1;
 const DEFAULT_POOL_TIMEOUT_SECONDS = 30;
 const DEFAULT_CONNECT_TIMEOUT_SECONDS = 20;
 const DEFAULT_CONNECT_RETRIES = 5;
@@ -22,10 +23,13 @@ function prismaClientOptions(): Prisma.PrismaClientOptions {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) return {};
 
-  // The hosted PostgreSQL plan has fewer usable connection slots than
-  // Prisma's CPU-derived default pool size. Keep headroom for migrations and
-  // administration, and let short traffic bursts wait instead of failing.
-  const connectionLimit = positiveInteger(process.env.DATABASE_CONNECTION_LIMIT, DEFAULT_CONNECTION_LIMIT);
+  // Each Vercel instance has its own Prisma pool. A five-connection pool per
+  // instance quickly exhausts a small hosted PostgreSQL plan as functions
+  // scale out, so serverless instances default to one connection each.
+  // Long-running servers retain a small pool, and either default can be
+  // overridden explicitly with DATABASE_CONNECTION_LIMIT.
+  const defaultConnectionLimit = process.env.VERCEL ? DEFAULT_SERVERLESS_CONNECTION_LIMIT : DEFAULT_SERVER_CONNECTION_LIMIT;
+  const connectionLimit = positiveInteger(process.env.DATABASE_CONNECTION_LIMIT, defaultConnectionLimit);
   const poolTimeout = positiveInteger(process.env.DATABASE_POOL_TIMEOUT, DEFAULT_POOL_TIMEOUT_SECONDS);
   // A TLS handshake to the remote host regularly takes 2-4s, which leaves
   // Prisma's 5s default connect_timeout with too little margin.
