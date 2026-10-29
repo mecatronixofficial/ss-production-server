@@ -6,6 +6,8 @@ const DEFAULT_SERVERLESS_CONNECTION_LIMIT = 1;
 const DEFAULT_POOL_TIMEOUT_SECONDS = 30;
 const DEFAULT_CONNECT_TIMEOUT_SECONDS = 20;
 const DEFAULT_CONNECT_RETRIES = 5;
+const DEFAULT_TRANSACTION_MAX_WAIT_MS = 10_000;
+const DEFAULT_TRANSACTION_TIMEOUT_MS = 30_000;
 const RETRY_BASE_DELAY_MS = 2_000;
 const RETRY_MAX_DELAY_MS = 15_000;
 const RETRYABLE_CONNECTION_ERRORS = new Set(['P1001', 'P1002', 'P1017']);
@@ -36,10 +38,18 @@ function prismaClientOptions(): Prisma.PrismaClientOptions {
   // Prisma's 5s default connect_timeout with too little margin.
   const connectTimeout = positiveInteger(process.env.DATABASE_CONNECT_TIMEOUT, DEFAULT_CONNECT_TIMEOUT_SECONDS);
 
+  // Interactive transactions (a goods receipt, a dispatch…) make many sequential round trips to the remote
+  // database; Prisma's 5s default timeout and 2s maxWait expire them part-way through as P2028.
+  const transactionOptions = {
+    maxWait: positiveInteger(process.env.DATABASE_TRANSACTION_MAX_WAIT, DEFAULT_TRANSACTION_MAX_WAIT_MS),
+    timeout: positiveInteger(process.env.DATABASE_TRANSACTION_TIMEOUT, DEFAULT_TRANSACTION_TIMEOUT_MS),
+  };
+
   const withConnectionLimit = appendParameter(databaseUrl, 'connection_limit', connectionLimit);
   const withPoolTimeout = appendParameter(withConnectionLimit, 'pool_timeout', poolTimeout);
   return {
     datasourceUrl: appendParameter(withPoolTimeout, 'connect_timeout', connectTimeout),
+    transactionOptions,
   };
 }
 
