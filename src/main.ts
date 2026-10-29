@@ -10,6 +10,10 @@ import { AppModule } from './app.module';
 import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter';
 import { requestLogger } from './common/middleware/request-logger.middleware';
 
+// "Today", "this month" and document-number years are worked out in the server's local time. A PC here runs on
+// IST, but Vercel runs on UTC (and reserves the TZ variable), so set it here; APP_TIMEZONE overrides it.
+process.env.TZ = process.env.APP_TIMEZONE || 'Asia/Kolkata';
+
 function trustProxySetting(value: string | undefined): boolean | number | string {
   if (value === undefined || value === '') return 'loopback';
   if (value === 'true') return true;

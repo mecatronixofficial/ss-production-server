@@ -33,6 +33,8 @@ export class PrismaExceptionFilter implements ExceptionFilter {
         return [HttpStatus.BAD_REQUEST, 'A value is too long for its field'];
       case 'P2024':
         return [HttpStatus.SERVICE_UNAVAILABLE, 'The server is busy. Please retry in a moment.'];
+      case 'P2028':
+        return [HttpStatus.SERVICE_UNAVAILABLE, 'The request took too long and nothing was saved. Please retry.'];
       case 'P2034':
         return [HttpStatus.CONFLICT, 'The record was changed by another request. Please retry.'];
       default:
