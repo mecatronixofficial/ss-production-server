@@ -1,13 +1,14 @@
 import { BadRequestException, Injectable, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { Role } from '@prisma/client';
+import { Prisma, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import * as argon2 from 'argon2';
 import { createHash, randomUUID } from 'crypto';
 import { LoginDto } from './dto/login.dto';
 import { notifyRoles, notifyUser } from '../notifications/notify.util';
 import { ADMIN_ROLES } from '../common/roles';
+import { lockKeys } from '../common/locks';
 
 type SessionUser = { id: string; email: string; name: string; role: Role };
 
@@ -45,6 +46,23 @@ export class AuthService {
     return createHash('sha256').update(token).digest('hex');
   }
 
+  private withUserLock<T>(userId: string, action: (tx: Prisma.TransactionClient) => Promise<T>) {
+    return this.prisma.$transaction(async (tx) => {
+      await lockKeys(tx, `auth-user:${userId}`);
+      return action(tx);
+    });
+  }
+
+  private async endSessionsWithin(tx: Prisma.TransactionClient, userId: string, exceptId?: string) {
+    const data = endedSession();
+    const where = { userId, expiresAt: { gt: data.expiresAt }, ...(exceptId ? { id: { not: exceptId } } : {}) };
+    const active = await tx.refreshSession.updateMany({ where: { ...where, revokedAt: null }, data });
+    // Recently rotated tokens are still within the refresh grace period. End those too,
+    // but report only the active devices, rather than counting every past rotation.
+    await tx.refreshSession.updateMany({ where, data });
+    return active.count;
+  }
+
   async validateCredentials(dto: LoginDto) {
     const user = await this.prisma.user.findUnique({ where: { email: dto.email.trim().toLowerCase() } });
     if (!user) {
@@ -57,14 +75,23 @@ export class AuthService {
     return user;
   }
 
-  async issueSession(user: SessionUser, userAgent?: string, ipAddress?: string) {
+  async issueSession(
+    user: SessionUser,
+    userAgent?: string,
+    ipAddress?: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<{ accessToken: string; refreshToken: string }> {
+    if (!tx) return this.withUserLock(user.id, (client) => this.issueSession(user, userAgent, ipAddress, client));
     const payload = { sub: user.id, email: user.email, name: user.name, role: user.role };
     const sid = randomUUID();
     const [accessToken, refreshToken] = await Promise.all([
-      this.jwt.signAsync(payload, {
-        secret: this.config.getOrThrow('JWT_ACCESS_SECRET'),
-        expiresIn: this.config.get('ACCESS_TOKEN_EXPIRES', '15m'),
-      }),
+      this.jwt.signAsync(
+        { ...payload, sid },
+        {
+          secret: this.config.getOrThrow('JWT_ACCESS_SECRET'),
+          expiresIn: this.config.get('ACCESS_TOKEN_EXPIRES', '15m'),
+        },
+      ),
       this.jwt.signAsync(
         { ...payload, sid },
         {
@@ -74,7 +101,7 @@ export class AuthService {
       ),
     ]);
     const decoded = this.jwt.decode(refreshToken);
-    await this.prisma.refreshSession.create({
+    await tx.refreshSession.create({
       data: {
         id: sid,
         userId: user.id,
@@ -97,31 +124,42 @@ export class AuthService {
       throw new UnauthorizedException('Refresh session expired');
     }
 
-    const session = await this.prisma.refreshSession.findUnique({ where: { id: payload.sid }, include: { user: true } });
-    if (!session || session.tokenHash !== this.hashToken(refreshToken) || session.expiresAt < new Date()) {
-      throw new UnauthorizedException('Refresh session expired');
-    }
-    // The browser often refreshes several parallel requests with the same
-    // cookie, so a token rotated a few seconds ago is still accepted. Reuse
-    // after that window means a stolen or replayed token: end every session.
-    if (session.revokedAt && Date.now() - session.revokedAt.getTime() > REFRESH_REUSE_GRACE_MS) {
-      this.logger.warn(`Refresh token reuse detected for user ${session.userId}; revoking all sessions`);
-      await this.revokeAll(session.userId);
-      throw new UnauthorizedException('Refresh session expired');
-    }
-    if (session.user.status !== 'ACTIVE') {
-      await this.revokeAll(session.userId);
-      throw new UnauthorizedException('Account is not active');
-    }
-
-    await this.prisma.refreshSession.updateMany({ where: { id: session.id, revokedAt: null }, data: { revokedAt: new Date() } });
-    return this.issueSession(session.user, userAgent, ipAddress);
+    if (typeof payload.sub !== 'string' || typeof payload.sid !== 'string') throw new UnauthorizedException('Refresh session expired');
+    const result = await this.withUserLock(payload.sub, async (tx) => {
+      const session = await tx.refreshSession.findUnique({ where: { id: payload.sid }, include: { user: true } });
+      if (!session || session.userId !== payload.sub || session.tokenHash !== this.hashToken(refreshToken) || session.expiresAt <= new Date()) {
+        throw new UnauthorizedException('Refresh session expired');
+      }
+      // Parallel browser refreshes can reuse a recently rotated token. Later reuse ends all devices.
+      if (session.revokedAt && Date.now() - session.revokedAt.getTime() > REFRESH_REUSE_GRACE_MS) {
+        this.logger.warn(`Refresh token reuse detected for user ${session.userId}; revoking all sessions`);
+        await this.endSessionsWithin(tx, session.userId);
+        return { error: 'Refresh session expired' };
+      }
+      if (session.user.status !== 'ACTIVE') {
+        await this.endSessionsWithin(tx, session.userId);
+        return { error: 'Account is not active' };
+      }
+      await tx.refreshSession.updateMany({ where: { id: session.id, revokedAt: null }, data: { revokedAt: new Date() } });
+      return { tokens: await this.issueSession(session.user, userAgent, ipAddress, tx) };
+    });
+    // Throw after committing the revocations; throwing inside the transaction would undo them.
+    if (result.error) throw new UnauthorizedException(result.error);
+    return result.tokens!;
   }
 
   async revoke(refreshToken?: string) {
     if (!refreshToken) return;
-    const decoded = this.jwt.decode(refreshToken);
-    if (decoded?.sid) await this.prisma.refreshSession.updateMany({ where: { id: decoded.sid, revokedAt: null }, data: endedSession() });
+    const payload = await this.jwt
+      .verifyAsync<{ sid?: string; sub?: string }>(refreshToken, { secret: this.config.getOrThrow('JWT_REFRESH_SECRET') })
+      .catch(() => null);
+    if (typeof payload?.sid !== 'string' || typeof payload.sub !== 'string') return;
+    await this.withUserLock(payload.sub, (tx) =>
+      tx.refreshSession.updateMany({
+        where: { id: payload.sid, userId: payload.sub, tokenHash: this.hashToken(refreshToken) },
+        data: endedSession(),
+      }),
+    );
   }
 
   /**
@@ -235,11 +273,9 @@ export class AuthService {
 
     const passwordHash = await argon2.hash(newPassword);
     const signedOut = await this.prisma.$transaction(async (tx) => {
+      await lockKeys(tx, `auth-user:${userId}`);
       await tx.user.update({ where: { id: userId }, data: { passwordHash } });
-      const revoked = await tx.refreshSession.updateMany({
-        where: { userId, revokedAt: null, ...(keepSessionId ? { id: { not: keepSessionId } } : {}) },
-        data: endedSession(),
-      });
+      const revoked = await this.endSessionsWithin(tx, userId, keepSessionId);
       await tx.auditLog.create({
         data: {
           actorId: userId,
@@ -247,7 +283,7 @@ export class AuthService {
           module: 'auth',
           entity: 'User',
           entityId: userId,
-          newValue: { passwordChanged: true, otherSessionsSignedOut: revoked.count },
+          newValue: { passwordChanged: true, otherSessionsSignedOut: revoked },
         },
       });
       await notifyUser(tx, userId, {
@@ -258,7 +294,7 @@ export class AuthService {
         referenceType: 'User',
         referenceId: userId,
       });
-      return revoked.count;
+      return revoked;
     });
     return { otherSessionsSignedOut: signedOut };
   }
@@ -276,22 +312,21 @@ export class AuthService {
   }
 
   async revokeSession(userId: string, sessionId: string) {
-    const revoked = await this.prisma.refreshSession.updateMany({
-      where: { id: sessionId, userId, revokedAt: null },
-      data: endedSession(),
-    });
+    const revoked = await this.withUserLock(userId, (tx) =>
+      tx.refreshSession.updateMany({
+        where: { id: sessionId, userId, revokedAt: null },
+        data: endedSession(),
+      }),
+    );
     if (!revoked.count) throw new NotFoundException('Session not found or already signed out');
   }
 
   async revokeOtherSessions(userId: string, currentSessionId?: string) {
-    const revoked = await this.prisma.refreshSession.updateMany({
-      where: { userId, revokedAt: null, ...(currentSessionId ? { id: { not: currentSessionId } } : {}) },
-      data: endedSession(),
-    });
-    return { signedOut: revoked.count };
+    const signedOut = await this.withUserLock(userId, (tx) => this.endSessionsWithin(tx, userId, currentSessionId));
+    return { signedOut };
   }
 
   async revokeAll(userId: string) {
-    await this.prisma.refreshSession.updateMany({ where: { userId, revokedAt: null }, data: endedSession() });
+    await this.withUserLock(userId, (tx) => this.endSessionsWithin(tx, userId));
   }
 }

@@ -38,6 +38,7 @@ import {
   isOpenCheque,
   movedOn,
   round2,
+  saleMoney,
   thisMonth,
   TXN_PREFIX,
 } from './money-rules';
@@ -533,16 +534,14 @@ export class MoneyService implements OnModuleInit {
           select: { saleNo: true, status: true, totalAmount: true },
         });
         if (sale.status === SaleStatus.CANCELLED) throw new BadRequestException(`${sale.saleNo} was cancelled meanwhile`);
-        const taken = await tx.moneyTransaction.aggregate({
-          where: { saleId: party.sale.id, kind: MoneyTxnKind.RECEIPT, cancelledAt: null, NOT: { chequeStatus: ChequeStatus.BOUNCED } },
-          _sum: { amount: true },
-        });
-        const open = round2(Number(sale.totalAmount) - Number(taken._sum.amount ?? 0));
+        const receipts = (await saleMoney(tx, [party.sale.id])).get(party.sale.id);
+        const taken = round2((receipts?.received ?? 0) + (receipts?.pending ?? 0));
+        const open = round2(Number(sale.totalAmount) - taken);
         if (amount > open + 0.005) {
           throw new BadRequestException(
             open > 0.005
               ? `Only ${money(open)} is still to be received on ${sale.saleNo}. Record the extra ${money(round2(amount - open))} separately as an advance (without a bill).`
-              : `${sale.saleNo} is already fully received${Number(taken._sum.amount ?? 0) > 0 ? ' (counting cheques still to clear)' : ''}. Record this as an advance without a bill.`,
+              : `${sale.saleNo} is already fully received${taken > 0 ? ' (counting cheques still to clear)' : ''}. Record this as an advance without a bill.`,
           );
         }
       }

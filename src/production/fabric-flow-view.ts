@@ -8,18 +8,23 @@ export function fabricFlowView(flow: FabricProductionFlow & { expenses?: Array<{
   const number = (value: unknown) => (value === null || value === undefined ? null : Number(value));
   const purchasedWeightKg = Number(flow.purchasedWeightKg);
   const yarnReceivedKg = number(flow.yarnReceivedKg);
+  const knittingDeliveryKg = number(flow.knittingDeliveryKg);
   const dyeingDeliveryKg = number(flow.dyeingDeliveryKg);
   const fabricReceivedKg = number(flow.fabricReceivedKg);
+  const dyeingOutputWeightKg = number(flow.dyeingOutputWeightKg);
   const compactingDeliveryKg = number(flow.compactingDeliveryKg);
   const compactingReceivedKg = number(flow.compactingReceivedKg);
   const officeDeliveryKg = number(flow.officeDeliveryKg);
   const finalDeliveredKg = number(flow.finalDeliveredKg);
   const currentWeightKg =
-    finalDeliveredKg ?? officeDeliveryKg ?? compactingDeliveryKg ?? dyeingDeliveryKg ?? yarnReceivedKg ?? purchasedWeightKg;
+    officeDeliveryKg ?? compactingReceivedKg ?? compactingDeliveryKg ?? dyeingOutputWeightKg ??
+    fabricReceivedKg ?? dyeingDeliveryKg ?? knittingDeliveryKg ?? finalDeliveredKg ?? yarnReceivedKg ?? purchasedWeightKg;
   const yarnLossKg = yarnReceivedKg === null ? 0 : Math.max(0, purchasedWeightKg - yarnReceivedKg);
-  const knittingLossKg = yarnReceivedKg === null || dyeingDeliveryKg === null ? 0 : Math.max(0, yarnReceivedKg - dyeingDeliveryKg);
+  const knittingOutput = knittingDeliveryKg ?? dyeingDeliveryKg;
+  const knittingLossKg = yarnReceivedKg === null || knittingOutput === null ? 0 : Math.max(0, yarnReceivedKg - knittingOutput);
+  const dyeingOutput = compactingDeliveryKg ?? dyeingOutputWeightKg;
   const dyeingLossKg =
-    dyeingDeliveryKg === null || compactingDeliveryKg === null ? 0 : Math.max(0, dyeingDeliveryKg - compactingDeliveryKg);
+    dyeingDeliveryKg === null || dyeingOutput === null ? 0 : Math.max(0, dyeingDeliveryKg - dyeingOutput);
   const compactingLossKg =
     compactingDeliveryKg === null || officeDeliveryKg === null ? 0 : Math.max(0, compactingDeliveryKg - officeDeliveryKg);
   const balanceFabricKg = officeDeliveryKg === null ? currentWeightKg : Math.max(0, officeDeliveryKg - (finalDeliveredKg ?? 0));
@@ -41,11 +46,11 @@ export function fabricFlowView(flow: FabricProductionFlow & { expenses?: Array<{
     purchaseOtherCost: Number(flow.purchaseOtherCost),
     yarnReceivedKg,
     dailyProductivityKg: number(flow.dailyProductivityKg),
-    knittingDeliveryKg: number(flow.knittingDeliveryKg),
+    knittingDeliveryKg,
     knittingExpense: Number(flow.knittingExpense),
     dyeingDeliveryKg,
     fabricReceivedKg,
-    dyeingOutputWeightKg: number(flow.dyeingOutputWeightKg),
+    dyeingOutputWeightKg,
     dyeingExpense: Number(flow.dyeingExpense),
     compactingDeliveryKg,
     compactingReceivedKg,

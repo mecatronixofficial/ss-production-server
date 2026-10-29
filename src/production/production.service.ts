@@ -57,8 +57,8 @@ export class ProductionService {
 
   // ─── Standalone fabric flow ─────────────────────────────────────────────
 
-  private async requireFabricFlow(id: string) {
-    const flow = await this.prisma.fabricProductionFlow.findUnique({ where: { id } });
+  private async requireFabricFlow(id: string, db: PrismaService | Prisma.TransactionClient = this.prisma) {
+    const flow = await db.fabricProductionFlow.findUnique({ where: { id } });
     if (!flow) throw new NotFoundException('Yarn batch not found. Refresh the page and select an existing batch.');
     return flow;
   }
@@ -72,30 +72,36 @@ export class ProductionService {
     }
   }
 
-  private fabricFlowView(flow: FabricProductionFlow) {
+  private fabricFlowView(flow: FabricProductionFlow, user?: AuthUser) {
     const raw = flow as FabricProductionFlow & { deliveries?: Array<{ processStage: string }> };
-    const view = fabricFlowView(flow);
-    return raw.deliveries ? { ...view, deliveries: raw.deliveries.filter((delivery) => delivery.processStage === 'FINAL'), processDeliveries: raw.deliveries.filter((delivery) => delivery.processStage !== 'FINAL') } : view;
+    const base = fabricFlowView(flow);
+    const view = {
+      ...base,
+      deliveries: raw.deliveries?.filter((delivery) => delivery.processStage === 'FINAL') ?? [],
+      processDeliveries: raw.deliveries?.filter((delivery) => delivery.processStage !== 'FINAL') ?? [],
+    };
+    if (user?.role !== Role.MANAGER) return view;
+    return {
+      ...view,
+      yarnRatePerKg: 0,
+      purchaseOtherCost: 0,
+      knittingExpense: 0,
+      dyeingExpense: 0,
+      compactingExpense: 0,
+      collectedAmount: 0,
+      otherExpense: 0,
+      expenses: [],
+      deliveries: [],
+      processDeliveries: [],
+      metrics: { ...view.metrics, yarnAmount: 0, totalSpent: 0, additionalExpenses: 0, profit: 0 },
+    };
   }
 
   async fabricFlows(user?: AuthUser) {
     const flows = await this.prisma.fabricProductionFlow.findMany({ include: flowInclude, orderBy: [{ status: 'asc' }, { purchaseDate: 'desc' }] });
-    const fullData = flows.map((flow) => this.fabricFlowView(flow));
-    const data = user?.role === Role.MANAGER
-      ? fullData.filter((flow) => flow.status === 'KNITTING' && flow.knittingMillType === 'OWN').map((flow) => ({
-          ...flow,
-          yarnRatePerKg: 0,
-          purchaseOtherCost: 0,
-          knittingExpense: 0,
-          dyeingExpense: 0,
-          compactingExpense: 0,
-          collectedAmount: 0,
-          otherExpense: 0,
-          // Knitting tasks cannot have deliveries yet; omit the collection/expense payload entirely.
-          deliveries: [],
-          metrics: { ...flow.metrics, yarnAmount: 0, totalSpent: 0, profit: 0 },
-        }))
-      : fullData;
+    const data = flows
+      .filter((flow) => user?.role !== Role.MANAGER || (flow.status === 'KNITTING' && flow.knittingMillType === 'OWN'))
+      .map((flow) => this.fabricFlowView(flow, user));
     const summary = data.reduce(
       (totals, flow) => ({
         activeBatches: totals.activeBatches + (flow.status === 'DELIVERED' ? 0 : 1),
@@ -195,8 +201,8 @@ export class ProductionService {
     }
   }
 
-  private async assertProcessNotReceived(flowId: string, stage: 'KNITTING' | 'DYEING') {
-    if (await this.prisma.fabricFlowDelivery.findFirst({ where: { flowId, processStage: stage, receivedAt: { not: null } }, select: { id: true } })) {
+  private async assertProcessNotReceived(flowId: string, stage: 'KNITTING' | 'DYEING', db: PrismaService | Prisma.TransactionClient = this.prisma) {
+    if (await db.fabricFlowDelivery.findFirst({ where: { flowId, processStage: stage, receivedAt: { not: null } }, select: { id: true } })) {
       throw new BadRequestException(`${stage.toLowerCase()} material has been received by the warehouse and can no longer be changed`);
     }
   }
@@ -335,12 +341,18 @@ export class ProductionService {
     const field = dto.process === 'dyeing' ? 'dyeingIssueTxnId' : 'compactingIssueTxnId';
     const flow = await this.prisma.fabricProductionFlow.findUnique({ where: { flowNo: itemCode } });
     if (!flow) throw new BadRequestException(`${itemCode} is not linked to a production fabric code`);
-    if (dto.process === 'dyeing' && flow.knittingFinishedAt === null) throw new BadRequestException('Complete knitting before starting dyeing');
-    if (dto.process === 'compacting' && flow.dyeingOutputWeightKg === null) throw new BadRequestException('Complete dyeing before starting compacting');
-    if (flow[field]) throw new BadRequestException(`${dto.process} has already been started from warehouse stock`);
-
     const updated = await this.prisma.$transaction(async (tx) => {
-      const latest = await tx.stockTransaction.findFirst({ where: { itemCode, warehouseId: dto.warehouseId, category }, orderBy: { createdAt: 'desc' }, select: { itemName: true } });
+      await lockKeys(tx, `production-batch:${flow.id}`);
+      const current = await this.requireFabricFlow(flow.id, tx);
+      if (dto.process === 'dyeing' && current.knittingFinishedAt === null) throw new BadRequestException('Complete knitting before starting dyeing');
+      if (dto.process === 'compacting' && current.dyeingOutputWeightKg === null) throw new BadRequestException('Complete dyeing before starting compacting');
+      if (current[field]) throw new BadRequestException(`${dto.process} has already been started from warehouse stock`);
+      if (dto.process === 'dyeing' ? current.dyeingDate || current.dyeingFinishedAt : current.compactingDate || current.compactingFinishedAt) {
+        throw new BadRequestException(`${dto.process} has already been recorded for this batch`);
+      }
+      const warehouse = await tx.warehouse.findFirst({ where: { id: dto.warehouseId, active: true }, select: { id: true } });
+      if (!warehouse) throw new BadRequestException('Choose an active warehouse');
+      const latest = await tx.stockTransaction.findFirst({ where: { itemCode, warehouseId: dto.warehouseId, category, unit: 'KG', lotNo: null }, orderBy: { createdAt: 'desc' }, select: { itemName: true } });
       if (!latest) throw new BadRequestException(`${itemCode} is not available as ${category.toLowerCase().replace('_', ' ')}`);
       const issue = await this.inventory.issueWithin(tx, {
         category,
@@ -368,25 +380,28 @@ export class ProductionService {
 
   /** Corrects dates, party, mill, construction and yarn price while knitting; the yarn taken stays as it is. */
   async updateKnitting(id: string, dto: KnittingDetailsDto) {
-    this.assertKnittingOpen(await this.requireFabricFlow(id));
-    await this.assertProcessNotReceived(id, 'KNITTING');
-    const updated = await this.prisma.fabricProductionFlow.update({ where: { id }, data: this.knittingDetails(dto), include: flowInclude });
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await lockKeys(tx, `production-batch:${id}`);
+      this.assertKnittingOpen(await this.requireFabricFlow(id, tx));
+      await this.assertProcessNotReceived(id, 'KNITTING', tx);
+      return tx.fabricProductionFlow.update({ where: { id }, data: this.knittingDetails(dto), include: flowInclude });
+    });
     return this.fabricFlowView(updated);
   }
 
   /** Knitting done: the bags and total weight go on to dyeing. Can be corrected until dyeing receives it. */
   async finishKnitting(id: string, dto: FinishKnittingDto, user?: AuthUser) {
-    const flow = await this.requireFabricFlow(id);
-    this.assertKnittingOpen(flow);
-    await this.assertProcessNotReceived(id, 'KNITTING');
-    if (user?.role === Role.MANAGER && flow.knittingMillType !== 'OWN') {
-      throw new ForbiddenException('Other-mill knitting is recorded manually by an administrator');
-    }
-    const yarnUsed = Number(flow.yarnReceivedKg ?? flow.purchasedWeightKg);
-    this.assertWeight('Knitted total weight', dto.totalWeightKg, yarnUsed);
     const warehouse = await this.requireDestinationWarehouse(dto.destination, dto.warehouseId);
     const updated = await this.prisma.$transaction(async (tx) => {
       await lockKeys(tx, `production-batch:${id}`);
+      const flow = await this.requireFabricFlow(id, tx);
+      this.assertKnittingOpen(flow);
+      await this.assertProcessNotReceived(id, 'KNITTING', tx);
+      if (user?.role === Role.MANAGER && flow.knittingMillType !== 'OWN') {
+        throw new ForbiddenException('Other-mill knitting is recorded manually by an administrator');
+      }
+      const yarnUsed = Number(flow.yarnReceivedKg ?? flow.purchasedWeightKg);
+      this.assertWeight('Knitted total weight', dto.totalWeightKg, yarnUsed);
       await tx.fabricProductionFlow.update({
         where: { id },
         data: {
@@ -421,7 +436,7 @@ export class ProductionService {
       // Read back after the hand-off, so the answer shows where the fabric went.
       return tx.fabricProductionFlow.findUniqueOrThrow({ where: { id }, include: flowInclude });
     });
-    return this.fabricFlowView(updated);
+    return this.fabricFlowView(updated, user);
   }
 
   // ─── Attachments ────────────────────────────────────────────────────────
@@ -471,59 +486,68 @@ export class ProductionService {
 
   /** Dyeing started: the grey fabric is at the dyeing party and mill. Can be corrected until dyeing is completed. */
   async startDyeing(id: string, dto: StartDyeingDto) {
-    const flow = await this.requireFabricFlow(id);
-    if (flow.dyeingDeliveryKg === null) throw new BadRequestException('Complete knitting and send the grey fabric to dyeing first');
-    if (flow.dyeingFinishedAt) throw new BadRequestException(`Dyeing of ${flow.flowNo} is already completed`);
-    this.assertWeight('Fabric received at dyeing', dto.fabricReceivedKg, Number(flow.dyeingDeliveryKg));
-    const updated = await this.prisma.fabricProductionFlow.update({
-      where: { id },
-      data: {
-        dyeingDate: new Date(dto.startDate),
-        dyeingPartyDetails: dto.partyDetails.trim(),
-        dyeingMillDetails: dto.millDetails.trim(),
-        fabricReceivedKg: dto.fabricReceivedKg,
-        color: dto.color?.trim() || flow.color,
-        dyeingNotes: dto.notes?.trim() || null,
-      },
-      include: flowInclude,
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await lockKeys(tx, `production-batch:${id}`);
+      const flow = await this.requireFabricFlow(id, tx);
+      if (flow.dyeingDeliveryKg === null) throw new BadRequestException('Complete knitting and send the grey fabric to dyeing first');
+      if (flow.dyeingFinishedAt) throw new BadRequestException(`Dyeing of ${flow.flowNo} is already completed`);
+      this.assertWeight('Fabric received at dyeing', dto.fabricReceivedKg, Number(flow.dyeingDeliveryKg));
+      return tx.fabricProductionFlow.update({
+        where: { id },
+        data: {
+          dyeingDate: new Date(dto.startDate),
+          dyeingPartyDetails: dto.partyDetails.trim(),
+          dyeingMillDetails: dto.millDetails.trim(),
+          fabricReceivedKg: dto.fabricReceivedKg,
+          color: dto.color?.trim() || flow.color,
+          dyeingNotes: dto.notes?.trim() || null,
+        },
+        include: flowInclude,
+      });
     });
     return this.fabricFlowView(updated);
   }
 
   /** Compacting started: the dyed fabric is at the compacting party and mill. Can be corrected until compacting is completed. */
   async startCompacting(id: string, dto: StartCompactingDto) {
-    const flow = await this.requireFabricFlow(id);
-    if (flow.compactingDeliveryKg === null) throw new BadRequestException('Complete dyeing and send the dyed fabric to compacting first');
-    if (flow.compactingFinishedAt) throw new BadRequestException(`Compacting of ${flow.flowNo} is already completed`);
-    this.assertWeight('Weight received at compacting', dto.receivedKg, Number(flow.compactingDeliveryKg));
-    const updated = await this.prisma.fabricProductionFlow.update({
-      where: { id },
-      data: {
-        compactingDate: new Date(dto.startDate),
-        compactingPartyDetails: dto.partyDetails.trim(),
-        compactingMillDetails: dto.millDetails.trim(),
-        compactingInwardNo: dto.inwardNo?.trim() || null,
-        compactingReceivedKg: dto.receivedKg,
-        compactingNotes: dto.notes?.trim() || null,
-      },
-      include: flowInclude,
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await lockKeys(tx, `production-batch:${id}`);
+      const flow = await this.requireFabricFlow(id, tx);
+      if (flow.compactingDeliveryKg === null) throw new BadRequestException('Complete dyeing and send the dyed fabric to compacting first');
+      if (flow.compactingFinishedAt) throw new BadRequestException(`Compacting of ${flow.flowNo} is already completed`);
+      this.assertWeight('Weight received at compacting', dto.receivedKg, Number(flow.compactingDeliveryKg));
+      return tx.fabricProductionFlow.update({
+        where: { id },
+        data: {
+          compactingDate: new Date(dto.startDate),
+          compactingPartyDetails: dto.partyDetails.trim(),
+          compactingMillDetails: dto.millDetails.trim(),
+          compactingInwardNo: dto.inwardNo?.trim() || null,
+          compactingReceivedKg: dto.receivedKg,
+          compactingNotes: dto.notes?.trim() || null,
+        },
+        include: flowInclude,
+      });
     });
     return this.fabricFlowView(updated);
   }
 
   /** Completes dyeing (or corrects it until a warehouse receives its output): the dyed fabric goes on to compacting or a warehouse. */
   async updateFabricDyeing(id: string, dto: UpdateFabricDyeingDto) {
-    const flow = await this.requireFabricFlow(id);
-    await this.assertProcessNotReceived(id, 'DYEING');
-    if (flow.dyeingDeliveryKg === null) throw new BadRequestException('Complete the knitting stage before dyeing');
-    const finishedAt = this.finishDate('Dyeing', dto.dyeingDate, dto.finishedDate);
-    const delivered = Number(flow.dyeingDeliveryKg);
-    this.assertWeight('Fabric received at dyeing', dto.fabricReceivedKg, delivered);
-    this.assertWeight('Dyed fabric output', dto.dyeingOutputWeightKg, dto.fabricReceivedKg);
-    this.assertWeight('Delivery to compacting', dto.compactingDeliveryKg, dto.dyeingOutputWeightKg);
     const warehouse = await this.requireDestinationWarehouse(dto.destination, dto.warehouseId);
     const updated = await this.prisma.$transaction(async (tx) => {
       await lockKeys(tx, `production-batch:${id}`);
+      const flow = await this.requireFabricFlow(id, tx);
+      await this.assertProcessNotReceived(id, 'DYEING', tx);
+      if (flow.dyeingDeliveryKg === null) throw new BadRequestException('Complete the knitting stage before dyeing');
+      if (flow.compactingDate || flow.compactingFinishedAt || flow.officeDeliveryKg !== null) {
+        throw new BadRequestException('Compacting has already started; dyeing can no longer be changed');
+      }
+      const finishedAt = this.finishDate('Dyeing', dto.dyeingDate, dto.finishedDate);
+      const delivered = Number(flow.dyeingDeliveryKg);
+      this.assertWeight('Fabric received at dyeing', dto.fabricReceivedKg, delivered);
+      this.assertWeight('Dyed fabric output', dto.dyeingOutputWeightKg, dto.fabricReceivedKg);
+      this.assertWeight('Delivery to compacting', dto.compactingDeliveryKg, dto.dyeingOutputWeightKg);
       await tx.fabricProductionFlow.update({
         where: { id },
         data: {
@@ -567,18 +591,19 @@ export class ProductionService {
 
   /** Completes compacting (or corrects it): the compacted weight is the finished fabric, ready to deliver. */
   async updateFabricCompacting(id: string, dto: UpdateFabricCompactingDto) {
-    const flow = await this.requireFabricFlow(id);
-    if (flow.compactingDeliveryKg === null) throw new BadRequestException('Complete the dyeing stage before compacting');
-    const finishedAt = this.finishDate('Compacting', dto.compactingDate, dto.finishedDate);
-    const delivered = Number(flow.compactingDeliveryKg);
-    this.assertWeight('Weight received at compacting', dto.compactingReceivedKg, delivered);
-    this.assertWeight('Compacted weight', dto.officeDeliveryKg, dto.compactingReceivedKg);
-    // Compacting can be corrected after deliveries start, but not below what has already gone out.
-    const alreadyDelivered = Number(flow.finalDeliveredKg ?? 0);
-    if (dto.officeDeliveryKg < alreadyDelivered - 0.0005) {
-      throw new BadRequestException(`${alreadyDelivered.toFixed(3)} KG has already been delivered; the compacted weight can't be less`);
-    }
     const updated = await this.prisma.$transaction(async (tx) => {
+      await lockKeys(tx, `production-batch:${id}`);
+      const flow = await this.requireFabricFlow(id, tx);
+      if (flow.compactingDeliveryKg === null) throw new BadRequestException('Complete the dyeing stage before compacting');
+      const finishedAt = this.finishDate('Compacting', dto.compactingDate, dto.finishedDate);
+      const delivered = Number(flow.compactingDeliveryKg);
+      this.assertWeight('Weight received at compacting', dto.compactingReceivedKg, delivered);
+      this.assertWeight('Compacted weight', dto.officeDeliveryKg, dto.compactingReceivedKg);
+      // Read under the delivery lock so a concurrent delivery cannot invalidate this floor.
+      const alreadyDelivered = Number(flow.finalDeliveredKg ?? 0);
+      if (dto.officeDeliveryKg < alreadyDelivered - 0.0005) {
+        throw new BadRequestException(`${alreadyDelivered.toFixed(3)} KG has already been delivered; the compacted weight can't be less`);
+      }
       const saved = await tx.fabricProductionFlow.update({
         where: { id },
         data: {
@@ -772,10 +797,11 @@ export class ProductionService {
       await lockKeys(tx, `production-batch:${id}`);
       const delivery = await tx.fabricFlowDelivery.findFirst({ where: { id: deliveryId, flowId: id } });
       if (!delivery) throw new NotFoundException('Delivery not found');
+      if (delivery.processStage !== 'FINAL') throw new BadRequestException('Process hand-offs must be corrected in their knitting or dyeing stage');
       const current = await tx.fabricProductionFlow.findUniqueOrThrow({ where: { id } });
       if (delivery.stockTxnId) await this.inventory.removeInWithin(tx, delivery.stockTxnId, user.id);
       await tx.fabricFlowDelivery.delete({ where: { id: deliveryId } });
-      const latest = await tx.fabricFlowDelivery.findFirst({ where: { flowId: id }, orderBy: { deliveredAt: 'desc' }, select: { deliveredAt: true } });
+      const latest = await tx.fabricFlowDelivery.findFirst({ where: { flowId: id, processStage: 'FINAL' }, orderBy: { deliveredAt: 'desc' }, select: { deliveredAt: true } });
       const stillDelivered = Math.max(0, Number(current.finalDeliveredKg ?? 0) - Number(delivery.weightKg));
       await tx.auditLog.create({
         data: {

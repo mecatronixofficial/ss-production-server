@@ -36,13 +36,15 @@ export const LEDGER_LIMIT = 500;
 /** Latest movements shown in an item's details. */
 const ITEM_MOVEMENT_LIMIT = 200;
 
-/** One stock position: balances are kept per item, lot and warehouse. */
-type StockKey = { category: StockCategory; itemCode: string; warehouseId: string; lotNo: string | null };
+/** One stock position: balances are kept per category, item, lot, warehouse and unit. */
+type StockKey = { category: StockCategory; itemCode: string; warehouseId: string; lotNo: string | null; unit: string };
 
-const keyOf = (t: StockKey): StockKey => ({ category: t.category, itemCode: t.itemCode, warehouseId: t.warehouseId, lotNo: t.lotNo });
+const keyOf = (t: Omit<StockKey, 'unit'> & { unit?: string }): StockKey => ({
+  category: t.category, itemCode: t.itemCode, warehouseId: t.warehouseId, lotNo: t.lotNo, unit: t.unit ?? 'KG',
+});
 const lockName = (k: StockKey) => `stock:${k.category}:${k.itemCode}:${k.warehouseId}`;
 const sameKey = (a: StockKey, b: StockKey) =>
-  a.category === b.category && a.itemCode === b.itemCode && a.warehouseId === b.warehouseId && a.lotNo === b.lotNo;
+  a.category === b.category && a.itemCode === b.itemCode && a.warehouseId === b.warehouseId && a.lotNo === b.lotNo && a.unit === b.unit;
 /** "Cotton 30s combed" → "COTTON-30S-COMBED" */
 const codeFromName = (name: string) =>
   name
@@ -229,7 +231,7 @@ export class InventoryService {
         purchaseOrder: line.purchaseOrder,
         quantity: Number(line.quantity),
         unit: line.unit,
-        rate: Number(line.rate),
+        rate: opts.prices ? Number(line.rate) : null,
         receipts: line.receiptItems.map((r) => ({ ...r.purchaseReceipt, quantity: Number(r.quantity) })),
       })),
       movements,
@@ -281,7 +283,7 @@ export class InventoryService {
    * position (item, lot, warehouse) holds. The position is locked so two issues can't both take the last kilos.
    */
   async issueWithin(tx: Prisma.TransactionClient, data: StockTxnInput & { quantityOut: number }) {
-    const key: StockKey = { category: data.category, itemCode: data.itemCode, warehouseId: data.warehouseId, lotNo: data.lotNo ?? null };
+    const key = keyOf({ ...data, lotNo: data.lotNo ?? null });
     await lockKeys(tx, lockName(key));
     const available = await this.stockOf(tx, key);
     if (data.quantityOut > available + 0.0005) {
@@ -348,7 +350,7 @@ export class InventoryService {
         if (after < -0.0005 && after < before[i] - 0.0005) {
           const lot = k.lotNo ? ` lot ${k.lotNo}` : '';
           throw new BadRequestException(
-            `Not enough stock: ${k.itemCode}${lot} has ${Math.max(before[i], 0).toFixed(3)} KG; this would leave ${after.toFixed(3)} KG`,
+            `Not enough stock: ${k.itemCode}${lot} has ${Math.max(before[i], 0).toFixed(3)} ${k.unit}; this would leave ${after.toFixed(3)} ${k.unit}`,
           );
         }
       }
@@ -384,6 +386,7 @@ export class InventoryService {
       itemName: dto.itemName,
       lotNo: dto.lotNo || null,
       warehouseId: dto.warehouseId,
+      unit: current?.unit ?? 'KG',
       quantityIn: dto.direction === 'IN' ? dto.quantityKg : 0,
       quantityOut: dto.direction === 'OUT' ? dto.quantityKg : 0,
       notes: dto.notes || null,

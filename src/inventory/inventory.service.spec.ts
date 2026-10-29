@@ -37,7 +37,7 @@ function fakePrisma() {
       findUnique: ({ where }: { where: { id: string } }) => Promise.resolve(rows.find((r) => r.id === where.id) ?? null),
       findFirst: ({ where }: { where: Record<string, unknown> }) => Promise.resolve(rows.find((r) => matches(r, where)) ?? null),
       create: ({ data }: { data: Omit<Row, 'id' | 'createdAt'> }) => {
-        const row = { createdAt: new Date(), ...data, id: `t${rows.length + 1}` } as Row;
+        const row = { createdAt: new Date(), unit: 'KG', quantityIn: 0, quantityOut: 0, ...data, id: `t${rows.length + 1}` } as Row;
         rows.push(row);
         return Promise.resolve(row);
       },
@@ -164,6 +164,22 @@ describe('Godown entries', () => {
     await service.createEntry(entry({ direction: 'OUT', txnType: 'PRODUCTION_ISSUE', quantityKg: 60 }), user);
     await expect(service.deleteEntry(received.id, user)).rejects.toThrow('Not enough stock');
     expect(stock()).toBe(40);
+  });
+
+  it('does not use cones to cover an issue of kilograms with the same item code', async () => {
+    await service.createEntry(entry({ itemCode: 'Y1' }), user);
+    await db.stockTransaction.create({ data: { category: 'YARN', itemCode: 'Y1', itemName: 'Yarn', lotNo: null, warehouseId: 'wh-1', unit: 'CONE', quantityIn: 500, quantityOut: 0 } });
+    const issue = { category: 'YARN' as const, txnType: 'DISPATCH_OUT' as const, itemCode: 'Y1', itemName: 'Yarn', warehouseId: 'wh-1', quantityOut: 101, unit: 'KG', referenceType: 'SALE', referenceId: 's1' };
+    await expect(service.issueWithin(db as unknown as PrismaService, issue)).rejects.toThrow('Only 100.000 KG');
+    expect(db.rows().filter((row) => row.unit === 'KG')).toHaveLength(1);
+  });
+
+  it('does not use cones to cover deleting kilograms already issued', async () => {
+    const received = await service.createEntry(entry({ itemCode: 'Y1' }), user);
+    await service.createEntry(entry({ itemCode: 'Y1', direction: 'OUT', txnType: 'PRODUCTION_ISSUE', quantityKg: 60 }), user);
+    await db.stockTransaction.create({ data: { category: 'YARN', itemCode: 'Y1', itemName: 'Yarn', lotNo: null, warehouseId: 'wh-1', unit: 'CONE', quantityIn: 500, quantityOut: 0 } });
+    await expect(service.deleteEntry(received.id, user)).rejects.toThrow('Not enough stock');
+    await expect(service.removeInWithin(db as unknown as PrismaService, received.id)).rejects.toThrow('already been issued');
   });
 
   it('lets old negative positions be improved', async () => {
