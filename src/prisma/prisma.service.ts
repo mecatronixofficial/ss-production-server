@@ -8,6 +8,7 @@ const DEFAULT_CONNECT_TIMEOUT_SECONDS = 20;
 const DEFAULT_CONNECT_RETRIES = 5;
 const RETRY_BASE_DELAY_MS = 2_000;
 const RETRY_MAX_DELAY_MS = 15_000;
+const RETRYABLE_CONNECTION_ERRORS = new Set(['P1001', 'P1002', 'P1017']);
 
 function positiveInteger(value: string | undefined, fallback: number) {
   const parsed = Number(value);
@@ -52,14 +53,19 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
 
   async onModuleInit() {
     // The hosted database can be briefly unreachable while it powers on or
-    // restarts for maintenance, so retry initialization errors before failing.
+    // restarts for maintenance, so retry transient connection errors. Invalid
+    // URLs, credentials and schema configuration cannot recover by waiting.
     const attempts = positiveInteger(process.env.DATABASE_CONNECT_RETRIES, DEFAULT_CONNECT_RETRIES);
     for (let attempt = 1; ; attempt++) {
       try {
         await this.$connect();
         return;
       } catch (error) {
-        if (!(error instanceof Prisma.PrismaClientInitializationError) || attempt >= attempts) throw error;
+        if (
+          !(error instanceof Prisma.PrismaClientInitializationError) ||
+          !RETRYABLE_CONNECTION_ERRORS.has(error.errorCode ?? '') ||
+          attempt >= attempts
+        ) throw error;
         const delayMs = Math.min(RETRY_BASE_DELAY_MS * 2 ** (attempt - 1), RETRY_MAX_DELAY_MS);
         this.logger.warn(
           `Database connection attempt ${attempt}/${attempts} failed (${error.errorCode ?? 'unknown'}); retrying in ${delayMs / 1000}s`,

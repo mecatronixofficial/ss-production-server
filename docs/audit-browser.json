@@ -1,0 +1,200 @@
+{
+  "login": {
+    "status": 200,
+    "title": "Sign in · SS Clothing Mills",
+    "passwordInputs": 1,
+    "submitButtons": 1,
+    "blankEmailMessage": "Enter your email address",
+    "blankPasswordMessage": "Enter your password",
+    "loginRequests": 0
+  },
+  "unauthenticatedDashboardRedirect": "/login",
+  "routeChecks": [
+    {
+      "route": "/",
+      "status": 200,
+      "redirectedToLogin": true
+    },
+    {
+      "route": "/admin/audit",
+      "status": 200,
+      "redirectedToLogin": true
+    },
+    {
+      "route": "/admin/users",
+      "status": 200,
+      "redirectedToLogin": true
+    },
+    {
+      "route": "/admin/users/[id]",
+      "status": 200,
+      "redirectedToLogin": true
+    },
+    {
+      "route": "/challans",
+      "status": 200,
+      "redirectedToLogin": true
+    },
+    {
+      "route": "/finance",
+      "status": 200,
+      "redirectedToLogin": true
+    },
+    {
+      "route": "/godown",
+      "status": 200,
+      "redirectedToLogin": true
+    },
+    {
+      "route": "/masters/distributors",
+      "status": 200,
+      "redirectedToLogin": true
+    },
+    {
+      "route": "/masters/distributors/[id]",
+      "status": 200,
+      "redirectedToLogin": true
+    },
+    {
+      "route": "/masters/employees",
+      "status": 200,
+      "redirectedToLogin": true
+    },
+    {
+      "route": "/masters/employees/[id]",
+      "status": 200,
+      "redirectedToLogin": true
+    },
+    {
+      "route": "/masters/machines",
+      "status": 200,
+      "redirectedToLogin": true
+    },
+    {
+      "route": "/masters/machines/[id]",
+      "status": 200,
+      "redirectedToLogin": true
+    },
+    {
+      "route": "/masters/machines/run",
+      "status": 200,
+      "redirectedToLogin": true
+    },
+    {
+      "route": "/masters/mills",
+      "status": 200,
+      "redirectedToLogin": true
+    },
+    {
+      "route": "/masters/mills/[id]",
+      "status": 200,
+      "redirectedToLogin": true
+    },
+    {
+      "route": "/masters/processing-companies",
+      "status": 200,
+      "redirectedToLogin": true
+    },
+    {
+      "route": "/masters/processing-factories",
+      "status": 200,
+      "redirectedToLogin": true
+    },
+    {
+      "route": "/masters/suppliers",
+      "status": 200,
+      "redirectedToLogin": true
+    },
+    {
+      "route": "/masters/textiles",
+      "status": 200,
+      "redirectedToLogin": true
+    },
+    {
+      "route": "/masters/textiles/[id]",
+      "status": 200,
+      "redirectedToLogin": true
+    },
+    {
+      "route": "/money",
+      "status": 200,
+      "redirectedToLogin": true
+    },
+    {
+      "route": "/notifications",
+      "status": 200,
+      "redirectedToLogin": true
+    },
+    {
+      "route": "/production",
+      "status": 200,
+      "redirectedToLogin": true
+    },
+    {
+      "route": "/profile",
+      "status": 200,
+      "redirectedToLogin": true
+    },
+    {
+      "route": "/purchases",
+      "status": 200,
+      "redirectedToLogin": true
+    },
+    {
+      "route": "/purchases/[id]",
+      "status": 200,
+      "redirectedToLogin": true
+    },
+    {
+      "route": "/reports",
+      "status": 200,
+      "redirectedToLogin": true
+    },
+    {
+      "route": "/sales",
+      "status": 200,
+      "redirectedToLogin": true
+    },
+    {
+      "route": "/sales/[id]",
+      "status": 200,
+      "redirectedToLogin": true
+    },
+    {
+      "route": "/sales/[id]/edit",
+      "status": 200,
+      "redirectedToLogin": true
+    },
+    {
+      "route": "/sales/new",
+      "status": 200,
+      "redirectedToLogin": true
+    },
+    {
+      "route": "/settings",
+      "status": 200,
+      "redirectedToLogin": true
+    },
+    {
+      "route": "/track",
+      "status": 200,
+      "redirectedToLogin": true
+    },
+    {
+      "route": "/warehouses",
+      "status": 200,
+      "redirectedToLogin": true
+    },
+    {
+      "route": "/warehouses/[id]",
+      "status": 200,
+      "redirectedToLogin": true
+    },
+    {
+      "route": "/warehouses/item",
+      "status": 200,
+      "redirectedToLogin": true
+    }
+  ],
+  "pageErrors": []
+}

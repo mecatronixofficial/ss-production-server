@@ -1,0 +1,2499 @@
+{
+  "pages": [
+    "/",
+    "/admin/audit",
+    "/admin/users",
+    "/admin/users/[id]",
+    "/challans",
+    "/dashboard",
+    "/finance",
+    "/godown",
+    "/login",
+    "/masters/distributors",
+    "/masters/distributors/[id]",
+    "/masters/employees",
+    "/masters/employees/[id]",
+    "/masters/machines",
+    "/masters/machines/[id]",
+    "/masters/machines/run",
+    "/masters/mills",
+    "/masters/mills/[id]",
+    "/masters/processing-companies",
+    "/masters/processing-factories",
+    "/masters/suppliers",
+    "/masters/textiles",
+    "/masters/textiles/[id]",
+    "/money",
+    "/notifications",
+    "/production",
+    "/profile",
+    "/purchases",
+    "/purchases/[id]",
+    "/reports",
+    "/sales",
+    "/sales/[id]",
+    "/sales/[id]/edit",
+    "/sales/new",
+    "/settings",
+    "/track",
+    "/warehouses",
+    "/warehouses/[id]",
+    "/warehouses/item"
+  ],
+  "endpoints": [
+    {
+      "method": "GET",
+      "route": "/admin/settings/company",
+      "file": "src/admin/admin.controller.ts"
+    },
+    {
+      "method": "PUT",
+      "route": "/admin/settings/company",
+      "file": "src/admin/admin.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/admin/audit-logs",
+      "file": "src/admin/audit-logs.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/admin/audit-logs/summary",
+      "file": "src/admin/audit-logs.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/admin/audit-logs/export",
+      "file": "src/admin/audit-logs.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/auth/login",
+      "file": "src/auth/auth.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/auth/forgot-password",
+      "file": "src/auth/auth.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/auth/refresh",
+      "file": "src/auth/auth.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/auth/logout",
+      "file": "src/auth/auth.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/auth/me",
+      "file": "src/auth/auth.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/auth/profile",
+      "file": "src/auth/auth.controller.ts"
+    },
+    {
+      "method": "PATCH",
+      "route": "/auth/profile",
+      "file": "src/auth/auth.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/auth/change-password",
+      "file": "src/auth/auth.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/auth/sessions",
+      "file": "src/auth/auth.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/auth/sessions/revoke-others",
+      "file": "src/auth/auth.controller.ts"
+    },
+    {
+      "method": "DELETE",
+      "route": "/auth/sessions/:id",
+      "file": "src/auth/auth.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/dashboard",
+      "file": "src/dashboard/dashboard.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/finance/summary",
+      "file": "src/finance/finance.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/finance/overview",
+      "file": "src/finance/finance.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/money/summary",
+      "file": "src/finance/money.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/money/context",
+      "file": "src/finance/money.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/money/security",
+      "file": "src/finance/money.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/money/accounts",
+      "file": "src/finance/money.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/money/accounts",
+      "file": "src/finance/money.controller.ts"
+    },
+    {
+      "method": "PATCH",
+      "route": "/money/accounts/:id",
+      "file": "src/finance/money.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/money/accounts/:id/reveal",
+      "file": "src/finance/money.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/money/transactions",
+      "file": "src/finance/money.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/money/transactions/:id",
+      "file": "src/finance/money.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/money/transactions",
+      "file": "src/finance/money.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/money/transactions/:id/cancel",
+      "file": "src/finance/money.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/money/transactions/:id/cheque",
+      "file": "src/finance/money.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/money/parties",
+      "file": "src/finance/money.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/money/statement",
+      "file": "src/finance/money.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/money/accounts/:id/cashbook",
+      "file": "src/finance/money.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/money/expenses",
+      "file": "src/finance/money.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/money/expenses",
+      "file": "src/finance/money.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/money/expenses/:id/cancel",
+      "file": "src/finance/money.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/health",
+      "file": "src/health.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/inventory/balances",
+      "file": "src/inventory/inventory.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/inventory/items-summary",
+      "file": "src/inventory/inventory.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/inventory/item",
+      "file": "src/inventory/inventory.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/inventory/ledger",
+      "file": "src/inventory/inventory.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/inventory/entries",
+      "file": "src/inventory/inventory.controller.ts"
+    },
+    {
+      "method": "PATCH",
+      "route": "/inventory/entries/:id",
+      "file": "src/inventory/inventory.controller.ts"
+    },
+    {
+      "method": "DELETE",
+      "route": "/inventory/entries/:id",
+      "file": "src/inventory/inventory.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/inventory/bills",
+      "file": "src/inventory/inventory.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/inventory/bills/:id",
+      "file": "src/inventory/inventory.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/inventory/bills/:id/pdf",
+      "file": "src/inventory/inventory.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/inventory/bills/issue-all",
+      "file": "src/inventory/inventory.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/inventory/bills",
+      "file": "src/inventory/inventory.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/inventory/bills/clear-unbilled",
+      "file": "src/inventory/inventory.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/inventory/bills/:id/cancel",
+      "file": "src/inventory/inventory.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/knitting/context",
+      "file": "src/knitting/knitting.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/knitting/runs",
+      "file": "src/knitting/knitting.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/knitting/runs",
+      "file": "src/knitting/knitting.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/knitting/runs/:id/finish",
+      "file": "src/knitting/knitting.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/knitting/runs/:id/reopen",
+      "file": "src/knitting/knitting.controller.ts"
+    },
+    {
+      "method": "DELETE",
+      "route": "/knitting/runs/:id",
+      "file": "src/knitting/knitting.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/masters/suppliers",
+      "file": "src/masters/masters.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/masters/suppliers/:id/account",
+      "file": "src/masters/masters.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/masters/suppliers/next-code",
+      "file": "src/masters/masters.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/masters/suppliers",
+      "file": "src/masters/masters.controller.ts"
+    },
+    {
+      "method": "PATCH",
+      "route": "/masters/suppliers/:id",
+      "file": "src/masters/masters.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/masters/textiles",
+      "file": "src/masters/masters.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/masters/textiles/next-code",
+      "file": "src/masters/masters.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/masters/textiles/:id/account",
+      "file": "src/masters/masters.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/masters/textiles",
+      "file": "src/masters/masters.controller.ts"
+    },
+    {
+      "method": "PATCH",
+      "route": "/masters/textiles/:id",
+      "file": "src/masters/masters.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/masters/mills",
+      "file": "src/masters/masters.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/masters/mills/:id/account",
+      "file": "src/masters/masters.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/masters/mills/next-code",
+      "file": "src/masters/masters.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/masters/mills",
+      "file": "src/masters/masters.controller.ts"
+    },
+    {
+      "method": "PATCH",
+      "route": "/masters/mills/:id",
+      "file": "src/masters/masters.controller.ts"
+    },
+    {
+      "method": "DELETE",
+      "route": "/masters/mills/:id",
+      "file": "src/masters/masters.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/masters/machines",
+      "file": "src/masters/masters.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/masters/machines/stats",
+      "file": "src/masters/masters.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/masters/machines",
+      "file": "src/masters/masters.controller.ts"
+    },
+    {
+      "method": "PATCH",
+      "route": "/masters/machines/:id",
+      "file": "src/masters/masters.controller.ts"
+    },
+    {
+      "method": "DELETE",
+      "route": "/masters/machines/:id",
+      "file": "src/masters/masters.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/masters/employees",
+      "file": "src/masters/masters.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/masters/employees/:id/account",
+      "file": "src/masters/masters.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/masters/employees/next-code",
+      "file": "src/masters/masters.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/masters/employees",
+      "file": "src/masters/masters.controller.ts"
+    },
+    {
+      "method": "PATCH",
+      "route": "/masters/employees/:id",
+      "file": "src/masters/masters.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/masters/warehouses",
+      "file": "src/masters/masters.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/masters/warehouses/summary",
+      "file": "src/masters/masters.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/masters/warehouses/:id/stock",
+      "file": "src/masters/masters.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/masters/warehouses",
+      "file": "src/masters/masters.controller.ts"
+    },
+    {
+      "method": "PATCH",
+      "route": "/masters/warehouses/:id",
+      "file": "src/masters/masters.controller.ts"
+    },
+    {
+      "method": "DELETE",
+      "route": "/masters/warehouses/:id",
+      "file": "src/masters/masters.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/notifications",
+      "file": "src/notifications/notifications.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/notifications/latest",
+      "file": "src/notifications/notifications.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/notifications/unread-count",
+      "file": "src/notifications/notifications.controller.ts"
+    },
+    {
+      "method": "PATCH",
+      "route": "/notifications/read-all",
+      "file": "src/notifications/notifications.controller.ts"
+    },
+    {
+      "method": "PATCH",
+      "route": "/notifications/:id/read",
+      "file": "src/notifications/notifications.controller.ts"
+    },
+    {
+      "method": "DELETE",
+      "route": "/notifications",
+      "file": "src/notifications/notifications.controller.ts"
+    },
+    {
+      "method": "DELETE",
+      "route": "/notifications/:id",
+      "file": "src/notifications/notifications.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/procurement/context",
+      "file": "src/procurement/procurement.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/procurement/purchase-orders",
+      "file": "src/procurement/procurement.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/procurement/purchase-orders/:id",
+      "file": "src/procurement/procurement.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/procurement/incoming",
+      "file": "src/procurement/procurement.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/procurement/receipts",
+      "file": "src/procurement/procurement.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/procurement/receipts/:id",
+      "file": "src/procurement/procurement.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/procurement/receipts/:id/pdf",
+      "file": "src/procurement/procurement.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/procurement/purchase-orders",
+      "file": "src/procurement/procurement.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/procurement/purchase-orders/:id/receive",
+      "file": "src/procurement/procurement.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/procurement/purchase-orders/:id/cancel",
+      "file": "src/procurement/procurement.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/procurement/purchase-orders/:id/close",
+      "file": "src/procurement/procurement.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/production/fabric-flows",
+      "file": "src/production/production.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/production/fabric-flows/directory",
+      "file": "src/production/production.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/production/fabric-flows/start-knitting",
+      "file": "src/production/production.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/production/fabric-flows/start-stock-process",
+      "file": "src/production/production.controller.ts"
+    },
+    {
+      "method": "PATCH",
+      "route": "/production/fabric-flows/:id/knitting",
+      "file": "src/production/production.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/production/fabric-flows/:id/knitting/finish",
+      "file": "src/production/production.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/production/fabric-flows/:id/dyeing/start",
+      "file": "src/production/production.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/production/fabric-flows/:id/compacting/start",
+      "file": "src/production/production.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/production/fabric-flows/:id/dyeing",
+      "file": "src/production/production.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/production/fabric-flows/:id/compacting",
+      "file": "src/production/production.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/production/fabric-flows/:id/deliveries",
+      "file": "src/production/production.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/production/incoming-fabric",
+      "file": "src/production/production.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/production/deliveries/:deliveryId/receive",
+      "file": "src/production/production.controller.ts"
+    },
+    {
+      "method": "DELETE",
+      "route": "/production/fabric-flows/:id/deliveries/:deliveryId",
+      "file": "src/production/production.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/production/fabric-flows/:id/expenses",
+      "file": "src/production/production.controller.ts"
+    },
+    {
+      "method": "DELETE",
+      "route": "/production/fabric-flows/:id/expenses/:expenseId",
+      "file": "src/production/production.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/production/fabric-flows/:id/attachments",
+      "file": "src/production/production.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/production/fabric-flows/:id/attachments/:attachmentId",
+      "file": "src/production/production.controller.ts"
+    },
+    {
+      "method": "DELETE",
+      "route": "/production/fabric-flows/:id/attachments/:attachmentId",
+      "file": "src/production/production.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/reports",
+      "file": "src/reports/reports.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/reports/:key",
+      "file": "src/reports/reports.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/reports/:key/export.xlsx",
+      "file": "src/reports/reports.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/reports/:key/export.pdf",
+      "file": "src/reports/reports.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/sales",
+      "file": "src/sales/sales.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/sales/context",
+      "file": "src/sales/sales.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/sales/outgoing",
+      "file": "src/sales/sales.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/sales/dispatched",
+      "file": "src/sales/sales.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/sales/delivery-challans",
+      "file": "src/sales/sales.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/sales/:id/delivery-challan",
+      "file": "src/sales/sales.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/sales/:id/delivery-challan/pdf",
+      "file": "src/sales/sales.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/sales/:id",
+      "file": "src/sales/sales.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/sales",
+      "file": "src/sales/sales.controller.ts"
+    },
+    {
+      "method": "PATCH",
+      "route": "/sales/:id",
+      "file": "src/sales/sales.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/sales/:id/cancel",
+      "file": "src/sales/sales.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/sales/:id/dispatch",
+      "file": "src/sales/sales.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/sales/:id/reject",
+      "file": "src/sales/sales.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/search",
+      "file": "src/search/search.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/files/upload",
+      "file": "src/storage/storage.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/users",
+      "file": "src/users/users.controller.ts"
+    },
+    {
+      "method": "GET",
+      "route": "/users/:id",
+      "file": "src/users/users.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/users",
+      "file": "src/users/users.controller.ts"
+    },
+    {
+      "method": "PATCH",
+      "route": "/users/:id",
+      "file": "src/users/users.controller.ts"
+    },
+    {
+      "method": "POST",
+      "route": "/users/:id/sign-out",
+      "file": "src/users/users.controller.ts"
+    },
+    {
+      "method": "DELETE",
+      "route": "/users/:id",
+      "file": "src/users/users.controller.ts"
+    }
+  ],
+  "models": [
+    "User",
+    "RefreshSession",
+    "Supplier",
+    "Textile",
+    "Mill",
+    "Warehouse",
+    "Employee",
+    "Machine",
+    "KnittingRun",
+    "KnittingRunYarn",
+    "YarnStockLot",
+    "DyeRecipe",
+    "Chemical",
+    "DyeRecipeItem",
+    "PurchaseOrder",
+    "PurchaseOrderItem",
+    "PurchaseReceipt",
+    "PurchaseReceiptItem",
+    "MoneyAccount",
+    "MoneyTransaction",
+    "Expense",
+    "StockTransaction",
+    "Notification",
+    "AuditLog",
+    "SystemSetting",
+    "FabricProductionFlow",
+    "FabricFlowExpense",
+    "FabricFlowDelivery",
+    "FabricFlowAttachment",
+    "DocumentSequence",
+    "Sale",
+    "SaleItem",
+    "StockBill"
+  ],
+  "frontendApiCalls": [
+    {
+      "file": "app/(erp)/admin/audit/page.tsx",
+      "line": 280,
+      "route": "summaryPath",
+      "method": "GET",
+      "backendMatches": []
+    },
+    {
+      "file": "app/(erp)/admin/audit/page.tsx",
+      "line": 281,
+      "route": "listPath",
+      "method": "GET",
+      "backendMatches": []
+    },
+    {
+      "file": "app/(erp)/admin/audit/page.tsx",
+      "line": 307,
+      "route": "/admin/audit-logs/export",
+      "method": "GET",
+      "backendMatches": [
+        "GET /admin/audit-logs/export"
+      ]
+    },
+    {
+      "file": "app/(erp)/admin/users/page.tsx",
+      "line": 57,
+      "route": "/users",
+      "method": "GET",
+      "backendMatches": [
+        "GET /users",
+        "POST /users"
+      ]
+    },
+    {
+      "file": "app/(erp)/admin/users/page.tsx",
+      "line": 58,
+      "route": "/masters/employees",
+      "method": "GET",
+      "backendMatches": [
+        "GET /masters/employees",
+        "POST /masters/employees"
+      ]
+    },
+    {
+      "file": "app/(erp)/admin/users/shared.tsx",
+      "line": 208,
+      "route": "/users",
+      "method": "POST",
+      "backendMatches": [
+        "GET /users",
+        "POST /users"
+      ]
+    },
+    {
+      "file": "app/(erp)/admin/users/shared.tsx",
+      "line": 216,
+      "route": "/users/:value",
+      "method": "PATCH",
+      "backendMatches": [
+        "GET /users/:id",
+        "PATCH /users/:id",
+        "DELETE /users/:id"
+      ]
+    },
+    {
+      "file": "app/(erp)/admin/users/shared.tsx",
+      "line": 365,
+      "route": "/users/:value/sign-out",
+      "method": "POST",
+      "backendMatches": [
+        "POST /users/:id/sign-out"
+      ]
+    },
+    {
+      "file": "app/(erp)/admin/users/shared.tsx",
+      "line": 381,
+      "route": "/users/:value",
+      "method": "PATCH",
+      "backendMatches": [
+        "GET /users/:id",
+        "PATCH /users/:id",
+        "DELETE /users/:id"
+      ]
+    },
+    {
+      "file": "app/(erp)/admin/users/shared.tsx",
+      "line": 394,
+      "route": "/users/:value",
+      "method": "DELETE",
+      "backendMatches": [
+        "GET /users/:id",
+        "PATCH /users/:id",
+        "DELETE /users/:id"
+      ]
+    },
+    {
+      "file": "app/(erp)/admin/users/[id]/page.tsx",
+      "line": 37,
+      "route": "/users/:value",
+      "method": "GET",
+      "backendMatches": [
+        "GET /users/:id",
+        "PATCH /users/:id",
+        "DELETE /users/:id"
+      ]
+    },
+    {
+      "file": "app/(erp)/admin/users/[id]/page.tsx",
+      "line": 38,
+      "route": "/masters/employees",
+      "method": "GET",
+      "backendMatches": [
+        "GET /masters/employees",
+        "POST /masters/employees"
+      ]
+    },
+    {
+      "file": "app/(erp)/admin/users/[id]/page.tsx",
+      "line": 39,
+      "route": "/users",
+      "method": "GET",
+      "backendMatches": [
+        "GET /users",
+        "POST /users"
+      ]
+    },
+    {
+      "file": "app/(erp)/challans/page.tsx",
+      "line": 117,
+      "route": "tab === \"delivery\" ? `/sales/delivery-challans${range}` : null",
+      "method": "GET",
+      "backendMatches": []
+    },
+    {
+      "file": "app/(erp)/challans/page.tsx",
+      "line": 118,
+      "route": "tab === \"received\" ? `/procurement/receipts${range}` : null",
+      "method": "GET",
+      "backendMatches": []
+    },
+    {
+      "file": "app/(erp)/challans/page.tsx",
+      "line": 119,
+      "route": "tab === \"warehouse\" ? `/inventory/bills${qs({ from: dayStart(from), to: dayEnd(to), kind: kind || undefined })}` : null",
+      "method": "GET",
+      "backendMatches": []
+    },
+    {
+      "file": "app/(erp)/challans/page.tsx",
+      "line": 135,
+      "route": "/inventory/bills/issue-all",
+      "method": "POST",
+      "backendMatches": [
+        "GET /inventory/bills/:id",
+        "POST /inventory/bills/issue-all"
+      ]
+    },
+    {
+      "file": "app/(erp)/dashboard/page.tsx",
+      "line": 136,
+      "route": "/dashboard",
+      "method": "DYNAMIC",
+      "backendMatches": [
+        "GET /dashboard"
+      ]
+    },
+    {
+      "file": "app/(erp)/dashboard/page.tsx",
+      "line": 163,
+      "route": "/notifications/:value/read",
+      "method": "PATCH",
+      "backendMatches": [
+        "PATCH /notifications/:id/read"
+      ]
+    },
+    {
+      "file": "app/(erp)/finance/page.tsx",
+      "line": 131,
+      "route": "validPeriod ? `/finance/overview?${range}` : null",
+      "method": "GET",
+      "backendMatches": []
+    },
+    {
+      "file": "app/(erp)/finance/page.tsx",
+      "line": 132,
+      "route": "tab === \"expenses\" && validPeriod ? `/money/expenses?${range}` : null",
+      "method": "GET",
+      "backendMatches": []
+    },
+    {
+      "file": "app/(erp)/finance/page.tsx",
+      "line": 133,
+      "route": "tab === \"collections\" || tab === \"production\" ? \"/production/fabric-flows\" : null",
+      "method": "GET",
+      "backendMatches": []
+    },
+    {
+      "file": "app/(erp)/masters/distributors/page.tsx",
+      "line": 212,
+      "route": "/masters/suppliers/next-code",
+      "method": "DYNAMIC",
+      "backendMatches": [
+        "GET /masters/suppliers/next-code",
+        "PATCH /masters/suppliers/:id"
+      ]
+    },
+    {
+      "file": "app/(erp)/masters/distributors/textiles-list.tsx",
+      "line": 261,
+      "route": "/masters/textiles/next-code",
+      "method": "DYNAMIC",
+      "backendMatches": [
+        "GET /masters/textiles/next-code",
+        "PATCH /masters/textiles/:id"
+      ]
+    },
+    {
+      "file": "app/(erp)/masters/distributors/[id]/page.tsx",
+      "line": 87,
+      "route": "/masters/suppliers/:value/account",
+      "method": "GET",
+      "backendMatches": [
+        "GET /masters/suppliers/:id/account"
+      ]
+    },
+    {
+      "file": "app/(erp)/masters/employees/page.tsx",
+      "line": 130,
+      "route": "/masters/employees/next-code",
+      "method": "DYNAMIC",
+      "backendMatches": [
+        "GET /masters/employees/next-code",
+        "PATCH /masters/employees/:id"
+      ]
+    },
+    {
+      "file": "app/(erp)/masters/employees/[id]/page.tsx",
+      "line": 66,
+      "route": "/masters/employees/:value/account",
+      "method": "GET",
+      "backendMatches": [
+        "GET /masters/employees/:id/account"
+      ]
+    },
+    {
+      "file": "app/(erp)/masters/machines/machine-dialog.tsx",
+      "line": 73,
+      "route": "machine ? `/masters/machines/${machine.id}` : \"/masters/machines\"",
+      "method": "DYNAMIC",
+      "backendMatches": []
+    },
+    {
+      "file": "app/(erp)/masters/machines/machine-dialog.tsx",
+      "line": 93,
+      "route": "/masters/machines/:value",
+      "method": "DELETE",
+      "backendMatches": [
+        "GET /masters/machines/stats",
+        "PATCH /masters/machines/:id",
+        "DELETE /masters/machines/:id"
+      ]
+    },
+    {
+      "file": "app/(erp)/masters/machines/page.tsx",
+      "line": 53,
+      "route": "/knitting/context",
+      "method": "GET",
+      "backendMatches": [
+        "GET /knitting/context"
+      ]
+    },
+    {
+      "file": "app/(erp)/masters/machines/page.tsx",
+      "line": 54,
+      "route": "/knitting/runs",
+      "method": "GET",
+      "backendMatches": [
+        "GET /knitting/runs",
+        "POST /knitting/runs"
+      ]
+    },
+    {
+      "file": "app/(erp)/masters/machines/page.tsx",
+      "line": 55,
+      "route": "/production/fabric-flows",
+      "method": "GET",
+      "backendMatches": [
+        "GET /production/fabric-flows"
+      ]
+    },
+    {
+      "file": "app/(erp)/masters/machines/run/page.tsx",
+      "line": 33,
+      "route": "/knitting/context",
+      "method": "GET",
+      "backendMatches": [
+        "GET /knitting/context"
+      ]
+    },
+    {
+      "file": "app/(erp)/masters/machines/run/page.tsx",
+      "line": 34,
+      "route": "/knitting/runs",
+      "method": "GET",
+      "backendMatches": [
+        "GET /knitting/runs",
+        "POST /knitting/runs"
+      ]
+    },
+    {
+      "file": "app/(erp)/masters/machines/run/page.tsx",
+      "line": 121,
+      "route": "/knitting/runs/:value/reopen",
+      "method": "POST",
+      "backendMatches": [
+        "POST /knitting/runs/:id/reopen"
+      ]
+    },
+    {
+      "file": "app/(erp)/masters/machines/run/page.tsx",
+      "line": 143,
+      "route": "/knitting/runs/:value",
+      "method": "DELETE",
+      "backendMatches": [
+        "DELETE /knitting/runs/:id"
+      ]
+    },
+    {
+      "file": "app/(erp)/masters/machines/run-dialogs.tsx",
+      "line": 131,
+      "route": "/knitting/runs",
+      "method": "POST",
+      "backendMatches": [
+        "GET /knitting/runs",
+        "POST /knitting/runs"
+      ]
+    },
+    {
+      "file": "app/(erp)/masters/machines/run-dialogs.tsx",
+      "line": 282,
+      "route": "/knitting/runs/:value/finish",
+      "method": "POST",
+      "backendMatches": [
+        "POST /knitting/runs/:id/finish"
+      ]
+    },
+    {
+      "file": "app/(erp)/masters/machines/[id]/page.tsx",
+      "line": 30,
+      "route": "/knitting/context",
+      "method": "GET",
+      "backendMatches": [
+        "GET /knitting/context"
+      ]
+    },
+    {
+      "file": "app/(erp)/masters/machines/[id]/page.tsx",
+      "line": 31,
+      "route": "/knitting/runs",
+      "method": "GET",
+      "backendMatches": [
+        "GET /knitting/runs",
+        "POST /knitting/runs"
+      ]
+    },
+    {
+      "file": "app/(erp)/masters/machines/[id]/page.tsx",
+      "line": 32,
+      "route": "/production/fabric-flows",
+      "method": "GET",
+      "backendMatches": [
+        "GET /production/fabric-flows"
+      ]
+    },
+    {
+      "file": "app/(erp)/masters/mills/page.tsx",
+      "line": 158,
+      "route": "/masters/mills/next-code",
+      "method": "DYNAMIC",
+      "backendMatches": [
+        "GET /masters/mills/next-code",
+        "PATCH /masters/mills/:id",
+        "DELETE /masters/mills/:id"
+      ]
+    },
+    {
+      "file": "app/(erp)/masters/mills/[id]/page.tsx",
+      "line": 79,
+      "route": "/masters/mills/:value/account",
+      "method": "GET",
+      "backendMatches": [
+        "GET /masters/mills/:id/account"
+      ]
+    },
+    {
+      "file": "app/(erp)/masters/textiles/[id]/page.tsx",
+      "line": 107,
+      "route": "/masters/textiles/:value/account",
+      "method": "GET",
+      "backendMatches": [
+        "GET /masters/textiles/:id/account"
+      ]
+    },
+    {
+      "file": "app/(erp)/money/dialogs.tsx",
+      "line": 73,
+      "route": "/money/transactions/:value/cheque",
+      "method": "DYNAMIC",
+      "backendMatches": [
+        "POST /money/transactions/:id/cheque"
+      ]
+    },
+    {
+      "file": "app/(erp)/money/dialogs.tsx",
+      "line": 137,
+      "route": "/money/transactions/:value/cancel",
+      "method": "DYNAMIC",
+      "backendMatches": [
+        "POST /money/transactions/:id/cancel"
+      ]
+    },
+    {
+      "file": "app/(erp)/money/dialogs.tsx",
+      "line": 231,
+      "route": "path",
+      "method": "GET",
+      "backendMatches": []
+    },
+    {
+      "file": "app/(erp)/money/dialogs.tsx",
+      "line": 336,
+      "route": "/money/accounts/:value/cashbook",
+      "method": "GET",
+      "backendMatches": [
+        "GET /money/accounts/:id/cashbook"
+      ]
+    },
+    {
+      "file": "app/(erp)/money/dialogs.tsx",
+      "line": 418,
+      "route": "/money/expenses/:value/cancel",
+      "method": "DYNAMIC",
+      "backendMatches": [
+        "POST /money/expenses/:id/cancel"
+      ]
+    },
+    {
+      "file": "app/(erp)/money/expenses-tab.tsx",
+      "line": 40,
+      "route": "path",
+      "method": "GET",
+      "backendMatches": []
+    },
+    {
+      "file": "app/(erp)/money/page.tsx",
+      "line": 142,
+      "route": "/money/summary",
+      "method": "GET",
+      "backendMatches": [
+        "GET /money/summary"
+      ]
+    },
+    {
+      "file": "app/(erp)/money/page.tsx",
+      "line": 143,
+      "route": "tab === \"parties\" || tab === \"overview\" ? \"/money/parties\" : null",
+      "method": "GET",
+      "backendMatches": []
+    },
+    {
+      "file": "app/(erp)/money/page.tsx",
+      "line": 144,
+      "route": "tab === \"accounts\" ? \"/money/security\" : null",
+      "method": "GET",
+      "backendMatches": []
+    },
+    {
+      "file": "app/(erp)/money/page.tsx",
+      "line": 164,
+      "route": "entriesPath",
+      "method": "GET",
+      "backendMatches": []
+    },
+    {
+      "file": "app/(erp)/money/page.tsx",
+      "line": 165,
+      "route": "tab === \"cheques\" || tab === \"overview\" ? \"/money/transactions?mode=CHEQUE\" : null",
+      "method": "GET",
+      "backendMatches": []
+    },
+    {
+      "file": "app/(erp)/money/page.tsx",
+      "line": 215,
+      "route": "/money/accounts/:value/reveal",
+      "method": "POST",
+      "backendMatches": [
+        "POST /money/accounts/:id/reveal"
+      ]
+    },
+    {
+      "file": "app/(erp)/notifications/page.tsx",
+      "line": 40,
+      "route": "/notifications",
+      "method": "GET",
+      "backendMatches": [
+        "GET /notifications",
+        "DELETE /notifications"
+      ]
+    },
+    {
+      "file": "app/(erp)/notifications/page.tsx",
+      "line": 60,
+      "route": "/notifications/read-all",
+      "method": "PATCH",
+      "backendMatches": [
+        "PATCH /notifications/read-all",
+        "DELETE /notifications/:id"
+      ]
+    },
+    {
+      "file": "app/(erp)/notifications/page.tsx",
+      "line": 69,
+      "route": "/notifications/:value/read",
+      "method": "PATCH",
+      "backendMatches": [
+        "PATCH /notifications/:id/read"
+      ]
+    },
+    {
+      "file": "app/(erp)/notifications/page.tsx",
+      "line": 79,
+      "route": "/notifications/:value",
+      "method": "DELETE",
+      "backendMatches": [
+        "GET /notifications/latest",
+        "GET /notifications/unread-count",
+        "PATCH /notifications/read-all",
+        "DELETE /notifications/:id"
+      ]
+    },
+    {
+      "file": "app/(erp)/notifications/page.tsx",
+      "line": 94,
+      "route": "/notifications",
+      "method": "DELETE",
+      "backendMatches": [
+        "GET /notifications",
+        "DELETE /notifications"
+      ]
+    },
+    {
+      "file": "app/(erp)/production/attachments.tsx",
+      "line": 50,
+      "route": "base",
+      "method": "POST",
+      "backendMatches": []
+    },
+    {
+      "file": "app/(erp)/production/attachments.tsx",
+      "line": 70,
+      "route": ":value/:value",
+      "method": "GET",
+      "backendMatches": []
+    },
+    {
+      "file": "app/(erp)/production/attachments.tsx",
+      "line": 84,
+      "route": ":value/:value",
+      "method": "DELETE",
+      "backendMatches": []
+    },
+    {
+      "file": "app/(erp)/production/delivery-stage.tsx",
+      "line": 28,
+      "route": "/masters/warehouses",
+      "method": "GET",
+      "backendMatches": [
+        "GET /masters/warehouses",
+        "POST /masters/warehouses"
+      ]
+    },
+    {
+      "file": "app/(erp)/production/delivery-stage.tsx",
+      "line": 53,
+      "route": "/production/fabric-flows/:value/deliveries",
+      "method": "POST",
+      "backendMatches": [
+        "POST /production/fabric-flows/:id/deliveries"
+      ]
+    },
+    {
+      "file": "app/(erp)/production/delivery-stage.tsx",
+      "line": 88,
+      "route": "/production/fabric-flows/:value/deliveries/:value",
+      "method": "DELETE",
+      "backendMatches": [
+        "DELETE /production/fabric-flows/:id/deliveries/:deliveryId"
+      ]
+    },
+    {
+      "file": "app/(erp)/production/expense-ledger.tsx",
+      "line": 21,
+      "route": "/production/fabric-flows/:value/expenses",
+      "method": "POST",
+      "backendMatches": [
+        "POST /production/fabric-flows/:id/expenses"
+      ]
+    },
+    {
+      "file": "app/(erp)/production/expense-ledger.tsx",
+      "line": 29,
+      "route": "/production/fabric-flows/:value/expenses/:value",
+      "method": "DELETE",
+      "backendMatches": [
+        "DELETE /production/fabric-flows/:id/expenses/:expenseId"
+      ]
+    },
+    {
+      "file": "app/(erp)/production/knitting-stage.tsx",
+      "line": 102,
+      "route": "/inventory/balances",
+      "method": "GET",
+      "backendMatches": [
+        "GET /inventory/balances"
+      ]
+    },
+    {
+      "file": "app/(erp)/production/knitting-stage.tsx",
+      "line": 103,
+      "route": "/masters/warehouses",
+      "method": "GET",
+      "backendMatches": [
+        "GET /masters/warehouses",
+        "POST /masters/warehouses"
+      ]
+    },
+    {
+      "file": "app/(erp)/production/knitting-stage.tsx",
+      "line": 115,
+      "route": "chosen ? `/inventory/item${qs({ code: chosen.itemCode })}` : null",
+      "method": "GET",
+      "backendMatches": []
+    },
+    {
+      "file": "app/(erp)/production/knitting-stage.tsx",
+      "line": 131,
+      "route": "/production/fabric-flows/start-knitting",
+      "method": "POST",
+      "backendMatches": [
+        "POST /production/fabric-flows/start-knitting"
+      ]
+    },
+    {
+      "file": "app/(erp)/production/knitting-stage.tsx",
+      "line": 345,
+      "route": "/masters/warehouses",
+      "method": "GET",
+      "backendMatches": [
+        "GET /masters/warehouses",
+        "POST /masters/warehouses"
+      ]
+    },
+    {
+      "file": "app/(erp)/production/knitting-stage.tsx",
+      "line": 400,
+      "route": "/production/fabric-flows/:value/knitting",
+      "method": "PATCH",
+      "backendMatches": [
+        "PATCH /production/fabric-flows/:id/knitting"
+      ]
+    },
+    {
+      "file": "app/(erp)/production/knitting-stage.tsx",
+      "line": 418,
+      "route": "/production/fabric-flows/:value/knitting/finish",
+      "method": "POST",
+      "backendMatches": [
+        "POST /production/fabric-flows/:id/knitting/finish"
+      ]
+    },
+    {
+      "file": "app/(erp)/production/page.tsx",
+      "line": 298,
+      "route": "/production/fabric-flows",
+      "method": "GET",
+      "backendMatches": [
+        "GET /production/fabric-flows"
+      ]
+    },
+    {
+      "file": "app/(erp)/production/page.tsx",
+      "line": 299,
+      "route": "/production/fabric-flows/directory",
+      "method": "GET",
+      "backendMatches": [
+        "GET /production/fabric-flows/directory"
+      ]
+    },
+    {
+      "file": "app/(erp)/production/page.tsx",
+      "line": 344,
+      "route": "/production/fabric-flows/start-stock-process",
+      "method": "POST",
+      "backendMatches": [
+        "POST /production/fabric-flows/start-stock-process"
+      ]
+    },
+    {
+      "file": "app/(erp)/production/page.tsx",
+      "line": 555,
+      "route": "/inventory/balances",
+      "method": "GET",
+      "backendMatches": [
+        "GET /inventory/balances"
+      ]
+    },
+    {
+      "file": "app/(erp)/production/page.tsx",
+      "line": 556,
+      "route": "/inventory/balances",
+      "method": "GET",
+      "backendMatches": [
+        "GET /inventory/balances"
+      ]
+    },
+    {
+      "file": "app/(erp)/production/page.tsx",
+      "line": 557,
+      "route": "/inventory/balances",
+      "method": "GET",
+      "backendMatches": [
+        "GET /inventory/balances"
+      ]
+    },
+    {
+      "file": "app/(erp)/production/page.tsx",
+      "line": 558,
+      "route": "/masters/warehouses",
+      "method": "GET",
+      "backendMatches": [
+        "GET /masters/warehouses",
+        "POST /masters/warehouses"
+      ]
+    },
+    {
+      "file": "app/(erp)/production/page.tsx",
+      "line": 800,
+      "route": "/masters/warehouses",
+      "method": "GET",
+      "backendMatches": [
+        "GET /masters/warehouses",
+        "POST /masters/warehouses"
+      ]
+    },
+    {
+      "file": "app/(erp)/production/page.tsx",
+      "line": 1072,
+      "route": "/production/fabric-flows/:value/dyeing",
+      "method": "POST",
+      "backendMatches": [
+        "POST /production/fabric-flows/:id/dyeing"
+      ]
+    },
+    {
+      "file": "app/(erp)/production/page.tsx",
+      "line": 1112,
+      "route": "/production/fabric-flows/:value/compacting",
+      "method": "POST",
+      "backendMatches": [
+        "POST /production/fabric-flows/:id/compacting"
+      ]
+    },
+    {
+      "file": "app/(erp)/production/page.tsx",
+      "line": 1295,
+      "route": "/inventory/balances",
+      "method": "GET",
+      "backendMatches": [
+        "GET /inventory/balances"
+      ]
+    },
+    {
+      "file": "app/(erp)/production/page.tsx",
+      "line": 1296,
+      "route": "/masters/warehouses",
+      "method": "GET",
+      "backendMatches": [
+        "GET /masters/warehouses",
+        "POST /masters/warehouses"
+      ]
+    },
+    {
+      "file": "app/(erp)/production/page.tsx",
+      "line": 1305,
+      "route": "/production/fabric-flows/start-stock-process",
+      "method": "POST",
+      "backendMatches": [
+        "POST /production/fabric-flows/start-stock-process"
+      ]
+    },
+    {
+      "file": "app/(erp)/production/process-start.tsx",
+      "line": 47,
+      "route": "/production/fabric-flows/:value/:value/start",
+      "method": "POST",
+      "backendMatches": [
+        "POST /production/fabric-flows/:id/dyeing/start",
+        "POST /production/fabric-flows/:id/compacting/start",
+        "DELETE /production/fabric-flows/:id/deliveries/:deliveryId",
+        "DELETE /production/fabric-flows/:id/expenses/:expenseId",
+        "GET /production/fabric-flows/:id/attachments/:attachmentId",
+        "DELETE /production/fabric-flows/:id/attachments/:attachmentId"
+      ]
+    },
+    {
+      "file": "app/(erp)/profile/page.tsx",
+      "line": 117,
+      "route": "/auth/profile",
+      "method": "PATCH",
+      "backendMatches": [
+        "GET /auth/profile",
+        "PATCH /auth/profile"
+      ]
+    },
+    {
+      "file": "app/(erp)/profile/page.tsx",
+      "line": 175,
+      "route": "/auth/change-password",
+      "method": "POST",
+      "backendMatches": [
+        "POST /auth/change-password"
+      ]
+    },
+    {
+      "file": "app/(erp)/profile/page.tsx",
+      "line": 242,
+      "route": "/auth/sessions",
+      "method": "GET",
+      "backendMatches": [
+        "GET /auth/sessions"
+      ]
+    },
+    {
+      "file": "app/(erp)/profile/page.tsx",
+      "line": 247,
+      "route": "/auth/sessions/:value",
+      "method": "DELETE",
+      "backendMatches": [
+        "POST /auth/sessions/revoke-others",
+        "DELETE /auth/sessions/:id"
+      ]
+    },
+    {
+      "file": "app/(erp)/profile/page.tsx",
+      "line": 256,
+      "route": "/auth/sessions/revoke-others",
+      "method": "POST",
+      "backendMatches": [
+        "POST /auth/sessions/revoke-others",
+        "DELETE /auth/sessions/:id"
+      ]
+    },
+    {
+      "file": "app/(erp)/profile/page.tsx",
+      "line": 313,
+      "route": "/auth/profile",
+      "method": "GET",
+      "backendMatches": [
+        "GET /auth/profile",
+        "PATCH /auth/profile"
+      ]
+    },
+    {
+      "file": "app/(erp)/purchases/page.tsx",
+      "line": 159,
+      "route": "/masters/warehouses/summary",
+      "method": "GET",
+      "backendMatches": [
+        "GET /masters/warehouses/summary",
+        "PATCH /masters/warehouses/:id",
+        "DELETE /masters/warehouses/:id"
+      ]
+    },
+    {
+      "file": "app/(erp)/purchases/page.tsx",
+      "line": 162,
+      "route": "/procurement/purchase-orders",
+      "method": "GET",
+      "backendMatches": [
+        "GET /procurement/purchase-orders",
+        "POST /procurement/purchase-orders"
+      ]
+    },
+    {
+      "file": "app/(erp)/purchases/page.tsx",
+      "line": 163,
+      "route": "/procurement/context",
+      "method": "GET",
+      "backendMatches": [
+        "GET /procurement/context"
+      ]
+    },
+    {
+      "file": "app/(erp)/purchases/page.tsx",
+      "line": 251,
+      "route": "/procurement/purchase-orders/:value/cancel",
+      "method": "POST",
+      "backendMatches": [
+        "POST /procurement/purchase-orders/:id/cancel"
+      ]
+    },
+    {
+      "file": "app/(erp)/purchases/page.tsx",
+      "line": 256,
+      "route": "/procurement/purchase-orders/:value/close",
+      "method": "POST",
+      "backendMatches": [
+        "POST /procurement/purchase-orders/:id/close"
+      ]
+    },
+    {
+      "file": "app/(erp)/purchases/page.tsx",
+      "line": 333,
+      "route": "/procurement/purchase-orders",
+      "method": "POST",
+      "backendMatches": [
+        "GET /procurement/purchase-orders",
+        "POST /procurement/purchase-orders"
+      ]
+    },
+    {
+      "file": "app/(erp)/purchases/[id]/page.tsx",
+      "line": 41,
+      "route": "/procurement/purchase-orders/:value",
+      "method": "GET",
+      "backendMatches": [
+        "GET /procurement/purchase-orders/:id"
+      ]
+    },
+    {
+      "file": "app/(erp)/purchases/[id]/page.tsx",
+      "line": 42,
+      "route": "/procurement/context",
+      "method": "GET",
+      "backendMatches": [
+        "GET /procurement/context"
+      ]
+    },
+    {
+      "file": "app/(erp)/purchases/[id]/page.tsx",
+      "line": 43,
+      "route": "/masters/warehouses/summary",
+      "method": "GET",
+      "backendMatches": [
+        "GET /masters/warehouses/summary",
+        "PATCH /masters/warehouses/:id",
+        "DELETE /masters/warehouses/:id"
+      ]
+    },
+    {
+      "file": "app/(erp)/purchases/[id]/page.tsx",
+      "line": 85,
+      "route": "/procurement/purchase-orders/:value/cancel",
+      "method": "POST",
+      "backendMatches": [
+        "POST /procurement/purchase-orders/:id/cancel"
+      ]
+    },
+    {
+      "file": "app/(erp)/purchases/[id]/page.tsx",
+      "line": 90,
+      "route": "/procurement/purchase-orders/:value/close",
+      "method": "POST",
+      "backendMatches": [
+        "POST /procurement/purchase-orders/:id/close"
+      ]
+    },
+    {
+      "file": "app/(erp)/reports/page.tsx",
+      "line": 230,
+      "route": "/reports",
+      "method": "GET",
+      "backendMatches": [
+        "GET /reports"
+      ]
+    },
+    {
+      "file": "app/(erp)/reports/page.tsx",
+      "line": 243,
+      "route": "info && !customInvalid ? `/reports/${info.key}?${query}` : null",
+      "method": "GET",
+      "backendMatches": []
+    },
+    {
+      "file": "app/(erp)/reports/page.tsx",
+      "line": 261,
+      "route": "/reports/:value/export.:value",
+      "method": "GET",
+      "backendMatches": [
+        "GET /reports/:key/export.xlsx",
+        "GET /reports/:key/export.pdf"
+      ]
+    },
+    {
+      "file": "app/(erp)/sales/page.tsx",
+      "line": 110,
+      "route": "/sales",
+      "method": "GET",
+      "backendMatches": [
+        "GET /sales",
+        "POST /sales"
+      ]
+    },
+    {
+      "file": "app/(erp)/sales/sale-form.tsx",
+      "line": 37,
+      "route": "/sales/context",
+      "method": "GET",
+      "backendMatches": [
+        "GET /sales/context",
+        "GET /sales/:id",
+        "PATCH /sales/:id"
+      ]
+    },
+    {
+      "file": "app/(erp)/sales/sale-form.tsx",
+      "line": 61,
+      "route": "f.warehouseId ? `/inventory/balances${qs({ warehouseId: f.warehouseId })}` : null",
+      "method": "GET",
+      "backendMatches": []
+    },
+    {
+      "file": "app/(erp)/sales/sale-form.tsx",
+      "line": 145,
+      "route": "sale ? `/sales/${sale.id}` : \"/sales\"",
+      "method": "DYNAMIC",
+      "backendMatches": []
+    },
+    {
+      "file": "app/(erp)/sales/[id]/edit/page.tsx",
+      "line": 15,
+      "route": "/sales/:value",
+      "method": "GET",
+      "backendMatches": [
+        "GET /sales/context",
+        "GET /sales/outgoing",
+        "GET /sales/dispatched",
+        "GET /sales/delivery-challans",
+        "GET /sales/:id",
+        "PATCH /sales/:id"
+      ]
+    },
+    {
+      "file": "app/(erp)/sales/[id]/page.tsx",
+      "line": 29,
+      "route": "/sales/:value",
+      "method": "GET",
+      "backendMatches": [
+        "GET /sales/context",
+        "GET /sales/outgoing",
+        "GET /sales/dispatched",
+        "GET /sales/delivery-challans",
+        "GET /sales/:id",
+        "PATCH /sales/:id"
+      ]
+    },
+    {
+      "file": "app/(erp)/sales/[id]/page.tsx",
+      "line": 31,
+      "route": "sale?.payment ? `/money/transactions?saleId=${id}&includeCancelled=true` : null",
+      "method": "GET",
+      "backendMatches": []
+    },
+    {
+      "file": "app/(erp)/sales/[id]/page.tsx",
+      "line": 60,
+      "route": "/sales/:value/cancel",
+      "method": "POST",
+      "backendMatches": [
+        "POST /sales/:id/cancel"
+      ]
+    },
+    {
+      "file": "app/(erp)/settings/page.tsx",
+      "line": 255,
+      "route": "/admin/settings/company",
+      "method": "GET",
+      "backendMatches": [
+        "GET /admin/settings/company",
+        "PUT /admin/settings/company"
+      ]
+    },
+    {
+      "file": "app/(erp)/settings/page.tsx",
+      "line": 299,
+      "route": "/admin/settings/company",
+      "method": "PUT",
+      "backendMatches": [
+        "GET /admin/settings/company",
+        "PUT /admin/settings/company"
+      ]
+    },
+    {
+      "file": "app/(erp)/warehouses/dispatch-dialog.tsx",
+      "line": 29,
+      "route": "/inventory/balances",
+      "method": "GET",
+      "backendMatches": [
+        "GET /inventory/balances"
+      ]
+    },
+    {
+      "file": "app/(erp)/warehouses/dispatch-dialog.tsx",
+      "line": 54,
+      "route": "/sales/:value/dispatch",
+      "method": "POST",
+      "backendMatches": [
+        "POST /sales/:id/dispatch"
+      ]
+    },
+    {
+      "file": "app/(erp)/warehouses/dispatch-dialog.tsx",
+      "line": 74,
+      "route": "/sales/:value/reject",
+      "method": "POST",
+      "backendMatches": [
+        "POST /sales/:id/reject"
+      ]
+    },
+    {
+      "file": "app/(erp)/warehouses/item-details.tsx",
+      "line": 111,
+      "route": "/inventory/item",
+      "method": "GET",
+      "backendMatches": [
+        "GET /inventory/item"
+      ]
+    },
+    {
+      "file": "app/(erp)/warehouses/page.tsx",
+      "line": 270,
+      "route": "/inventory/balances",
+      "method": "GET",
+      "backendMatches": [
+        "GET /inventory/balances"
+      ]
+    },
+    {
+      "file": "app/(erp)/warehouses/page.tsx",
+      "line": 332,
+      "route": "/inventory/entries/:value",
+      "method": "PATCH",
+      "backendMatches": [
+        "PATCH /inventory/entries/:id",
+        "DELETE /inventory/entries/:id"
+      ]
+    },
+    {
+      "file": "app/(erp)/warehouses/page.tsx",
+      "line": 333,
+      "route": "/inventory/entries",
+      "method": "POST",
+      "backendMatches": [
+        "POST /inventory/entries"
+      ]
+    },
+    {
+      "file": "app/(erp)/warehouses/page.tsx",
+      "line": 539,
+      "route": "/masters/warehouses",
+      "method": "GET",
+      "backendMatches": [
+        "GET /masters/warehouses",
+        "POST /masters/warehouses"
+      ]
+    },
+    {
+      "file": "app/(erp)/warehouses/page.tsx",
+      "line": 563,
+      "route": "warehouseId ? `/inventory/balances${qs({ warehouseId })}` : null",
+      "method": "GET",
+      "backendMatches": []
+    },
+    {
+      "file": "app/(erp)/warehouses/page.tsx",
+      "line": 564,
+      "route": "warehouseId && view === \"history\" ? `/inventory/ledger${qs({ category, itemCode, lotNo, warehouseId, from: dayStart(from), to: dayEnd(to) })}` : null",
+      "method": "GET",
+      "backendMatches": []
+    },
+    {
+      "file": "app/(erp)/warehouses/page.tsx",
+      "line": 568,
+      "route": "warehouseId && view === \"bills\" ? `/inventory/bills${qs({ warehouseId })}` : null",
+      "method": "GET",
+      "backendMatches": []
+    },
+    {
+      "file": "app/(erp)/warehouses/page.tsx",
+      "line": 570,
+      "route": "warehouseId && view === \"sold\" ? `/sales/dispatched${qs({ warehouseId, from: dayStart(from), to: dayEnd(to) })}` : null",
+      "method": "GET",
+      "backendMatches": []
+    },
+    {
+      "file": "app/(erp)/warehouses/page.tsx",
+      "line": 604,
+      "route": "warehouseId && canManageWarehouses ? `/inventory/bills${qs({ warehouseId })}` : null",
+      "method": "GET",
+      "backendMatches": []
+    },
+    {
+      "file": "app/(erp)/warehouses/page.tsx",
+      "line": 606,
+      "route": "warehouseId ? `/procurement/incoming${qs({ warehouseId })}` : null",
+      "method": "GET",
+      "backendMatches": []
+    },
+    {
+      "file": "app/(erp)/warehouses/page.tsx",
+      "line": 609,
+      "route": "warehouseId ? `/production/incoming-fabric${qs({ warehouseId })}` : null",
+      "method": "GET",
+      "backendMatches": []
+    },
+    {
+      "file": "app/(erp)/warehouses/page.tsx",
+      "line": 612,
+      "route": "warehouseId && canEdit ? `/sales/outgoing${qs({ warehouseId })}` : null",
+      "method": "GET",
+      "backendMatches": []
+    },
+    {
+      "file": "app/(erp)/warehouses/page.tsx",
+      "line": 681,
+      "route": "/inventory/bills/issue-all",
+      "method": "POST",
+      "backendMatches": [
+        "GET /inventory/bills/:id",
+        "POST /inventory/bills/issue-all"
+      ]
+    },
+    {
+      "file": "app/(erp)/warehouses/page.tsx",
+      "line": 701,
+      "route": "/inventory/bills/clear-unbilled",
+      "method": "POST",
+      "backendMatches": [
+        "GET /inventory/bills/:id",
+        "POST /inventory/bills/clear-unbilled"
+      ]
+    },
+    {
+      "file": "app/(erp)/warehouses/page.tsx",
+      "line": 793,
+      "route": "/inventory/bills",
+      "method": "POST",
+      "backendMatches": [
+        "GET /inventory/bills",
+        "POST /inventory/bills"
+      ]
+    },
+    {
+      "file": "app/(erp)/warehouses/page.tsx",
+      "line": 815,
+      "route": "/inventory/entries/:value",
+      "method": "DELETE",
+      "backendMatches": [
+        "PATCH /inventory/entries/:id",
+        "DELETE /inventory/entries/:id"
+      ]
+    },
+    {
+      "file": "app/(erp)/warehouses/receive-fabric-dialog.tsx",
+      "line": 57,
+      "route": "/production/deliveries/:value/receive",
+      "method": "POST",
+      "backendMatches": [
+        "POST /production/deliveries/:deliveryId/receive"
+      ]
+    },
+    {
+      "file": "app/(erp)/warehouses/warehouse-manager.tsx",
+      "line": 29,
+      "route": "/masters/warehouses/summary",
+      "method": "GET",
+      "backendMatches": [
+        "GET /masters/warehouses/summary",
+        "PATCH /masters/warehouses/:id",
+        "DELETE /masters/warehouses/:id"
+      ]
+    },
+    {
+      "file": "app/(erp)/warehouses/warehouse-manager.tsx",
+      "line": 54,
+      "route": "/masters/warehouses",
+      "method": "POST",
+      "backendMatches": [
+        "GET /masters/warehouses",
+        "POST /masters/warehouses"
+      ]
+    },
+    {
+      "file": "app/(erp)/warehouses/warehouse-manager.tsx",
+      "line": 55,
+      "route": "/masters/warehouses/:value",
+      "method": "PATCH",
+      "backendMatches": [
+        "GET /masters/warehouses/summary",
+        "PATCH /masters/warehouses/:id",
+        "DELETE /masters/warehouses/:id"
+      ]
+    },
+    {
+      "file": "app/(erp)/warehouses/warehouse-manager.tsx",
+      "line": 74,
+      "route": "/masters/warehouses/:value",
+      "method": "PATCH",
+      "backendMatches": [
+        "GET /masters/warehouses/summary",
+        "PATCH /masters/warehouses/:id",
+        "DELETE /masters/warehouses/:id"
+      ]
+    },
+    {
+      "file": "app/(erp)/warehouses/warehouse-manager.tsx",
+      "line": 84,
+      "route": "/masters/warehouses/:value",
+      "method": "DELETE",
+      "backendMatches": [
+        "GET /masters/warehouses/summary",
+        "PATCH /masters/warehouses/:id",
+        "DELETE /masters/warehouses/:id"
+      ]
+    },
+    {
+      "file": "app/(erp)/warehouses/[id]/page.tsx",
+      "line": 70,
+      "route": "/masters/warehouses/summary",
+      "method": "GET",
+      "backendMatches": [
+        "GET /masters/warehouses/summary",
+        "PATCH /masters/warehouses/:id",
+        "DELETE /masters/warehouses/:id"
+      ]
+    },
+    {
+      "file": "app/(erp)/warehouses/[id]/page.tsx",
+      "line": 76,
+      "route": "/inventory/items-summary",
+      "method": "GET",
+      "backendMatches": [
+        "GET /inventory/items-summary"
+      ]
+    },
+    {
+      "file": "app/(erp)/warehouses/[id]/page.tsx",
+      "line": 77,
+      "route": "canEdit ? `/sales/outgoing${qs({ warehouseId: id })}` : null",
+      "method": "GET",
+      "backendMatches": []
+    },
+    {
+      "file": "app/(erp)/warehouses/[id]/page.tsx",
+      "line": 78,
+      "route": "/procurement/incoming",
+      "method": "GET",
+      "backendMatches": [
+        "GET /procurement/incoming"
+      ]
+    },
+    {
+      "file": "app/(erp)/warehouses/[id]/page.tsx",
+      "line": 79,
+      "route": "/production/incoming-fabric",
+      "method": "GET",
+      "backendMatches": [
+        "GET /production/incoming-fabric"
+      ]
+    },
+    {
+      "file": "app/(erp)/warehouses/[id]/page.tsx",
+      "line": 80,
+      "route": "isAdmin ? `/inventory/bills${qs({ warehouseId: id })}` : null",
+      "method": "GET",
+      "backendMatches": []
+    },
+    {
+      "file": "app/login/page.tsx",
+      "line": 81,
+      "route": "/auth/login",
+      "method": "POST",
+      "backendMatches": [
+        "POST /auth/login"
+      ]
+    },
+    {
+      "file": "app/login/page.tsx",
+      "line": 207,
+      "route": "/auth/forgot-password",
+      "method": "POST",
+      "backendMatches": [
+        "POST /auth/forgot-password"
+      ]
+    },
+    {
+      "file": "components/auth-provider.tsx",
+      "line": 39,
+      "route": "/auth/me",
+      "method": "DYNAMIC",
+      "backendMatches": [
+        "GET /auth/me"
+      ]
+    },
+    {
+      "file": "components/auth-provider.tsx",
+      "line": 67,
+      "route": "/auth/logout",
+      "method": "POST",
+      "backendMatches": [
+        "POST /auth/logout"
+      ]
+    },
+    {
+      "file": "components/delivery-challan.tsx",
+      "line": 124,
+      "route": "/sales/:value/delivery-challan",
+      "method": "GET",
+      "backendMatches": [
+        "GET /sales/:id/delivery-challan"
+      ]
+    },
+    {
+      "file": "components/expense-dialog.tsx",
+      "line": 19,
+      "route": "/money/context",
+      "method": "GET",
+      "backendMatches": [
+        "GET /money/context"
+      ]
+    },
+    {
+      "file": "components/expense-dialog.tsx",
+      "line": 42,
+      "route": "/money/expenses",
+      "method": "DYNAMIC",
+      "backendMatches": [
+        "GET /money/expenses",
+        "POST /money/expenses"
+      ]
+    },
+    {
+      "file": "components/global-search.tsx",
+      "line": 124,
+      "route": "/search",
+      "method": "DYNAMIC",
+      "backendMatches": [
+        "GET /search"
+      ]
+    },
+    {
+      "file": "components/master-crud.tsx",
+      "line": 116,
+      "route": "listEndpoint",
+      "method": "GET",
+      "backendMatches": []
+    },
+    {
+      "file": "components/master-crud.tsx",
+      "line": 204,
+      "route": ":value/:value",
+      "method": "DELETE",
+      "backendMatches": []
+    },
+    {
+      "file": "components/master-crud.tsx",
+      "line": 223,
+      "route": ":value/:value",
+      "method": "PATCH",
+      "backendMatches": []
+    },
+    {
+      "file": "components/master-crud.tsx",
+      "line": 319,
+      "route": ":value/:value",
+      "method": "PATCH",
+      "backendMatches": []
+    },
+    {
+      "file": "components/master-crud.tsx",
+      "line": 320,
+      "route": "endpoint",
+      "method": "POST",
+      "backendMatches": []
+    },
+    {
+      "file": "components/money-account-dialog.tsx",
+      "line": 48,
+      "route": "/money/security",
+      "method": "GET",
+      "backendMatches": [
+        "GET /money/security"
+      ]
+    },
+    {
+      "file": "components/money-account-dialog.tsx",
+      "line": 80,
+      "route": "editing ? `/money/accounts/${account.id}` : \"/money/accounts\"",
+      "method": "DYNAMIC",
+      "backendMatches": []
+    },
+    {
+      "file": "components/money-entry-dialog.tsx",
+      "line": 70,
+      "route": "/money/context",
+      "method": "GET",
+      "backendMatches": [
+        "GET /money/context"
+      ]
+    },
+    {
+      "file": "components/money-entry-dialog.tsx",
+      "line": 155,
+      "route": "/money/transactions",
+      "method": "DYNAMIC",
+      "backendMatches": [
+        "GET /money/transactions",
+        "POST /money/transactions"
+      ]
+    },
+    {
+      "file": "components/party-picker.tsx",
+      "line": 229,
+      "route": "label.endpoint",
+      "method": "DYNAMIC",
+      "backendMatches": []
+    },
+    {
+      "file": "components/receive-dialog.tsx",
+      "line": 132,
+      "route": "/procurement/purchase-orders/:value/receive",
+      "method": "POST",
+      "backendMatches": [
+        "POST /procurement/purchase-orders/:id/receive"
+      ]
+    },
+    {
+      "file": "components/received-challan.tsx",
+      "line": 115,
+      "route": "/procurement/receipts/:value",
+      "method": "GET",
+      "backendMatches": [
+        "GET /procurement/receipts/:id"
+      ]
+    },
+    {
+      "file": "components/sale-bill.tsx",
+      "line": 22,
+      "route": "/admin/settings/company",
+      "method": "GET",
+      "backendMatches": [
+        "GET /admin/settings/company",
+        "PUT /admin/settings/company"
+      ]
+    },
+    {
+      "file": "components/share-menu.tsx",
+      "line": 55,
+      "route": "target.pdfPath",
+      "method": "GET",
+      "backendMatches": []
+    },
+    {
+      "file": "components/stock-bill.tsx",
+      "line": 84,
+      "route": "pdfPath(bill.id)",
+      "method": "GET",
+      "backendMatches": []
+    },
+    {
+      "file": "components/stock-bill.tsx",
+      "line": 101,
+      "route": "/inventory/bills/:value",
+      "method": "GET",
+      "backendMatches": [
+        "GET /inventory/bills/:id",
+        "POST /inventory/bills/issue-all",
+        "POST /inventory/bills/clear-unbilled"
+      ]
+    },
+    {
+      "file": "components/stock-bill.tsx",
+      "line": 115,
+      "route": "/inventory/bills/:value/cancel",
+      "method": "POST",
+      "backendMatches": [
+        "POST /inventory/bills/:id/cancel"
+      ]
+    },
+    {
+      "file": "components/topbar.tsx",
+      "line": 42,
+      "route": "/notifications/latest",
+      "method": "DYNAMIC",
+      "backendMatches": [
+        "GET /notifications/latest",
+        "DELETE /notifications/:id"
+      ]
+    },
+    {
+      "file": "components/topbar.tsx",
+      "line": 52,
+      "route": "/notifications/latest",
+      "method": "DYNAMIC",
+      "backendMatches": [
+        "GET /notifications/latest",
+        "DELETE /notifications/:id"
+      ]
+    },
+    {
+      "file": "lib/api.ts",
+      "line": 30,
+      "route": ":value/auth/refresh",
+      "method": "POST",
+      "backendMatches": []
+    },
+    {
+      "file": "lib/api.ts",
+      "line": 48,
+      "route": ":value:value",
+      "method": "DYNAMIC",
+      "backendMatches": []
+    },
+    {
+      "file": "lib/api.ts",
+      "line": 115,
+      "route": "path",
+      "method": "DYNAMIC",
+      "backendMatches": []
+    },
+    {
+      "file": "lib/unread-store.ts",
+      "line": 23,
+      "route": "/notifications/unread-count",
+      "method": "DYNAMIC",
+      "backendMatches": [
+        "GET /notifications/unread-count",
+        "DELETE /notifications/:id"
+      ]
+    },
+    {
+      "file": "lib/use-api-query.ts",
+      "line": 27,
+      "route": "path",
+      "method": "DYNAMIC",
+      "backendMatches": []
+    }
+  ]
+}

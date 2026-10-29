@@ -15,8 +15,8 @@ import { DispatchSaleDto, RejectSaleDto, SaleDto } from './dto/sale.dto';
 const EMPTY = 0.0005;
 const round = (value: number, places: number) => Math.round(value * 10 ** places) / 10 ** places;
 const blank = (value?: string | null) => value?.trim() || null;
-/** Same stock position: item, lot and unit. */
-const positionKey = (i: { itemCode: string; lotNo?: string | null; unit: string }) => [i.itemCode.trim(), i.lotNo?.trim() || '', i.unit.trim().toUpperCase()].join('|');
+/** Same stock position: category, item, lot and unit. */
+const positionKey = (i: { category: string; itemCode: string; lotNo?: string | null; unit: string }) => [i.category, i.itemCode.trim(), i.lotNo?.trim() || '', i.unit.trim().toUpperCase()].join('|');
 
 const saleInclude = {
   items: { orderBy: { itemCode: 'asc' as const } },
@@ -237,7 +237,7 @@ export class SalesService {
     const stock = await this.inventory.balance({ warehouseId: warehouse.id });
     for (const item of dto.items) {
       const held = stock
-        .filter((row) => positionKey({ itemCode: row.itemCode, lotNo: row.lotNo, unit: row.unit }) === positionKey(item))
+        .filter((row) => positionKey(row) === positionKey(item))
         .reduce((sum, row) => sum + row.balanceKg, 0);
       if (item.quantity > held + EMPTY) {
         const lot = item.lotNo ? ` lot ${item.lotNo}` : '';
@@ -409,6 +409,9 @@ export class SalesService {
       if (!current) throw new NotFoundException('Sale not found');
       if (current.status !== SaleStatus.PENDING) throw new BadRequestException(`${current.saleNo} is ${current.status.toLowerCase()}, not waiting to be dispatched`);
       const loaded = new Map(dto.items.map((line) => [line.id, line.quantity]));
+      if (loaded.size !== dto.items.length) throw new BadRequestException('A sale line can appear only once in a dispatch');
+      const itemIds = new Set(current.items.map((item) => item.id));
+      if (dto.items.some((line) => !itemIds.has(line.id))) throw new BadRequestException('Dispatch contains a line that is not part of this sale');
       if (current.items.some((item) => !loaded.has(item.id))) throw new BadRequestException('Give the loaded quantity of every line (0 for a line left out)');
       for (const item of current.items) {
         if (loaded.get(item.id)! > Number(item.quantity) + EMPTY) {
