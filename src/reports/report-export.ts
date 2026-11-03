@@ -1,6 +1,6 @@
-import ExcelJS from 'exceljs';
-import PDFDocument from 'pdfkit';
 import { ColumnType, ReportColumn, ReportResult } from './report-types';
+
+// ExcelJS and PDFKit are large and only needed for exports, so they load on the first one instead of at server start.
 
 const INK = '#1b3c55';
 const GOLD = '#a77a24';
@@ -88,6 +88,7 @@ function excelValue(value: CellValue, column: ReportColumn, timezone: string) {
 }
 
 export async function toExcel(report: ReportResult) {
+  const { default: ExcelJS } = await import('exceljs');
   const tz = report.company.timezone;
   const wb = new ExcelJS.Workbook();
   wb.creator = report.company.name;
@@ -163,7 +164,8 @@ export async function toExcel(report: ReportResult) {
 const PDF_MAX_COLUMN = 170;
 const PDF_CELL_PADDING = 8;
 
-export function toPdf(report: ReportResult) {
+export async function toPdf(report: ReportResult) {
+  const { default: PDFDocument } = await import('pdfkit');
   const tz = report.company.timezone;
   const doc = new PDFDocument({
     size: 'A4',

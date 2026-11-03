@@ -222,10 +222,12 @@ model Warehouse {
   fabricDeliveries FabricFlowDelivery[]
   knittingRuns     KnittingRun[]
   knittingRunYarns KnittingRunYarn[]
+  knittingDays     KnittingDayEntry[]
   sales            Sale[]
   stockBills       StockBill[]
   createdAt        DateTime               @default(now())
   updatedAt        DateTime               @updatedAt
+  yarnReceipts YarnReceipt[]
 }
 
 model Employee {
@@ -240,6 +242,8 @@ model Employee {
   user         User?
   machines     Machine[]     @relation("MachineOperator")
   knittingRuns KnittingRun[] @relation("KnittingRunOperator")
+  /// Money given to them (daily wage, salary, advance…), as Wages expenses.
+  expenses     Expense[]
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 }
@@ -250,7 +254,7 @@ model Machine {
   name         String
   department   String
   type         String?
-  /// Most yarn one load can take (240 KG unless set otherwise for the machine).
+  /// No longer limits what a machine is given: work is assigned by task and recorded day by day.
   capacityKg   Decimal?      @db.Decimal(12, 3)
   /// Knitting charge per KG of fabric; each run starts with it and can change it.
   ratePerKg    Decimal?      @db.Decimal(12, 2)
@@ -260,6 +264,8 @@ model Machine {
   operatorId   String?
   operator     Employee?     @relation("MachineOperator", fields: [operatorId], references: [id])
   knittingRuns KnittingRun[]
+  /// Repairs, spares, needles, oil, service and power spent on this machine.
+  expenses     Expense[]
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 }
@@ -275,7 +281,9 @@ enum KnittingRunStatus {
   FINISHED
 }
 
-/// One load of yarn knitted on a machine. The fabric goes into a warehouse as grey fabric under `runNo`.
+/// A Production task's work on one machine, from start until the machine is stopped or the work moves to another
+/// machine. What it knits is recorded day by day (`days`); the fabric goes into a warehouse as grey fabric under
+/// `runNo`. `yarnKg` is the task's yarn used so far (the fabric weight); runs from before day entries kept the load.
 model KnittingRun {
   id               String                @id @default(uuid())
   /// SS-2026-NNN: the run's code, and the grey fabric's item code in stock.
@@ -301,8 +309,11 @@ model KnittingRun {
   warehouse        Warehouse?            @relation(fields: [warehouseId], references: [id])
   stockTxnId       String?
   notes            String?
+  /// Why the run stopped when it wasn't the end of the work, e.g. "Moved to KN-03 · breakdown".
+  endReason        String?
   createdById      String?
   yarns            KnittingRunYarn[]
+  days             KnittingDayEntry[]
   productionFlowId String?
   productionFlow   FabricProductionFlow? @relation(fields: [productionFlowId], references: [id])
   createdAt        DateTime              @default(now())
@@ -311,6 +322,31 @@ model KnittingRun {
   @@index([machineId, status])
   @@index([productionFlowId, status])
   @@index([startedAt])
+}
+
+/// What one machine knitted on one production day (its Day shift 9 AM – 9 PM and the Night shift after it, to 9 AM),
+/// recorded at the end of the day. The fabric goes into the warehouse as grey fabric under the run's code.
+model KnittingDayEntry {
+  id          String      @id @default(uuid())
+  runId       String
+  run         KnittingRun @relation(fields: [runId], references: [id])
+  /// The production day, by its Day shift's date (a night after midnight still belongs to the day before).
+  date        DateTime    @db.Date
+  outputKg    Decimal     @db.Decimal(14, 3)
+  rollCount   Int
+  /// The yarn the machine used that day, entered at day end; taken as the fabric's weight when not entered.
+  yarnUsedKg  Decimal?    @db.Decimal(14, 3)
+  warehouseId String
+  warehouse   Warehouse   @relation(fields: [warehouseId], references: [id])
+  /// The grey fabric put into stock; none for a day the machine knitted nothing.
+  stockTxnId  String?
+  notes       String?
+  createdById String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@unique([runId, date])
+  @@index([date])
 }
 
 /// A yarn loaded on a run (a run knits one, two or three yarns together).
@@ -404,8 +440,8 @@ model PurchaseOrderItem {
   id              String                @id @default(uuid())
   purchaseOrderId String
   purchaseOrder   PurchaseOrder         @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
-  /// Given on the line's first receipt from the SS-<year>-<n> counter (shared with Track batches), so every
-  /// purchased item has its own code; later receipts of the line keep it. Null until then.
+  /// Given on the line's first receipt (01SS26…, the yarn code counter), so every purchased item has its own code;
+  /// later receipts of the line keep it. Null until then.
   itemCode        String?
   itemName        String
   /// The stock this line becomes when received (yarn, raw material, chemical…), chosen when ordering.
@@ -414,6 +450,9 @@ model PurchaseOrderItem {
   quantity        Decimal               @db.Decimal(14, 3)
   unit            String
   rate            Decimal               @db.Decimal(14, 2)
+  /// Its details as ordered, by material: yarn count, quality, blend, mill, shade, bags…; fabric type, dia, GSM,
+  /// colour, rolls…; brand, grade, pack size… — `[{ label, value }]`, printed under it on challans and bills.
+  specs           Json?
   receiptItems    PurchaseReceiptItem[]
 }
 
@@ -446,7 +485,17 @@ model PurchaseReceiptItem {
   purchaseReceipt     PurchaseReceipt   @relation(fields: [purchaseReceiptId], references: [id], onDelete: Cascade)
   purchaseOrderItemId String
   purchaseOrderItem   PurchaseOrderItem @relation(fields: [purchaseOrderItemId], references: [id])
+  /// What arrived, as weighed / counted at the godown.
   quantity            Decimal           @db.Decimal(14, 3)
+  /// The quantity written on the distributor's DC, to check the godown's against.
+  dcQuantity          Decimal?          @db.Decimal(14, 3)
+  /// Bags / rolls / packages as written ("30+9"), and their total.
+  packages            String?
+  packageCount        Int?
+  /// The count, shade or anything else noted for the line at receipt.
+  details             String?
+  /// Each detail ordered (count, quality, shade, GSM…) as checked at receipt: `[{ label, ordered, received, ok }]`.
+  checks              Json?
 
   @@unique([purchaseReceiptId, purchaseOrderItemId])
   @@index([purchaseOrderItemId])
@@ -587,6 +636,12 @@ model Expense {
   account       MoneyAccount? @relation(fields: [accountId], references: [id], onDelete: Restrict)
   branch        String?
   attachmentKey String?
+  /// The machine it was spent on (repair, spares, service…).
+  machineId     String?
+  machine       Machine?      @relation(fields: [machineId], references: [id], onDelete: Restrict)
+  /// The employee it was paid to (daily wage, salary, advance, bonus…), on the day it was given.
+  employeeId    String?
+  employee      Employee?     @relation(fields: [employeeId], references: [id], onDelete: Restrict)
   createdById   String?
   /// A wrong expense is cancelled with a reason (kept on record, counted nowhere), never deleted.
   cancelledAt   DateTime?
@@ -596,6 +651,8 @@ model Expense {
 
   @@index([expenseDate])
   @@index([accountId])
+  @@index([machineId, expenseDate])
+  @@index([employeeId, expenseDate])
 }
 
 model StockTransaction {
@@ -626,6 +683,7 @@ model StockTransaction {
   @@index([lotNo])
   @@index([referenceType, referenceId])
   @@index([createdAt])
+  @@index([warehouseId, createdAt])
 }
 
 model Notification {
@@ -643,6 +701,7 @@ model Notification {
   createdAt     DateTime             @default(now())
 
   @@index([userId, isRead, createdAt])
+  @@index([userId, type, createdAt])
 }
 
 model AuditLog {
@@ -683,6 +742,8 @@ enum KnittingMillType {
 enum ProcessDeliveryDestination {
   NEXT_PROCESS
   WAREHOUSE
+  /// Delivered to a party (a customer) when the process finished; the batch ends there.
+  PARTY
 }
 
 /// Standalone material flow for the owner's yarn-to-finished-fabric business (the Production page).
@@ -692,8 +753,14 @@ enum ProcessDeliveryDestination {
 /// a purchase entry (PI, party, mill) and keep those fields.
 model FabricProductionFlow {
   id     String           @id @default(uuid())
-  /// Batch code, e.g. SS-2026-003, written on the bags and followed through every process.
+  /// Batch code, written on the bags and followed through every process: a knitting batch is the yarn's code and
+  /// -KT01 (01SS26-KT01); each colour it is dyed in is a dyeing lot, -DY01 on that (01SS26-KT01-DY01), compacted and
+  /// delivered under the same code. Older batches keep their codes (SS-2026-003-D1).
   flowNo String           @unique
+  /// A dyeing lot's knitting batch: the lot took part (or all) of that batch's grey fabric.
+  parentId String?
+  parent   FabricProductionFlow?  @relation("DyeingLots", fields: [parentId], references: [id])
+  lots     FabricProductionFlow[] @relation("DyeingLots")
   status FabricFlowStatus @default(PURCHASED)
   source FabricSource     @default(PURCHASE)
 
@@ -703,7 +770,15 @@ model FabricProductionFlow {
   yarnWarehouse   Warehouse? @relation(fields: [yarnWarehouseId], references: [id])
   yarnLotNo       String?
   yarnIssueTxnId  String?
-  /// Fabric identity produced from this yarn allocation. New flows use YARN-CODE-D1, -D2, ...
+  /// The yarn knitting did not use, put back into stock when knitting finished.
+  yarnReturnTxnId String?
+  /// Grey fabric dyeing did not use, back in a warehouse (a dyeing lot's under its knitting batch's code).
+  dyeingBalanceKg   Decimal? @db.Decimal(14, 3)
+  greyReturnTxnId   String?
+  /// Dyed fabric compacting did not use, back in a warehouse under the batch's code.
+  compactingBalanceKg Decimal? @db.Decimal(14, 3)
+  dyedReturnTxnId     String?
+  /// The fabric made from this yarn.
   fabricType      String?
   fabricDiameter  String?
   /// Fabric weight in grams per square metre, e.g. "180" (optional, as typed).
@@ -738,6 +813,8 @@ model FabricProductionFlow {
   dyeingDeliveryKg               Decimal?                   @db.Decimal(14, 3)
   /// Knitting is started (knittingDate), then finished: bags, total weight (knittingDeliveryKg, which goes on to dyeing), place.
   knittingExpectedFinishDate     DateTime?
+  /// The fabric this knitting is meant to make; the yarn sent was worked out from it (with the usual knitting loss).
+  plannedFabricKg                Decimal?                   @db.Decimal(14, 3)
   knittingFinishedAt             DateTime?
   knittingBagCount               Int?
   knittingDeliveryPlace          String?
@@ -745,6 +822,8 @@ model FabricProductionFlow {
   knittingDestinationWarehouseId String?
   knittingNotes                  String?
   attachments                    FabricFlowAttachment[]
+  /// Delivery challans for the batch's fabric moving from one process (or warehouse) to the next.
+  challans                       ProcessChallan[]
   /// Where the finished fabric went: parties and / or warehouses. `finalDeliveredKg`, `collectedAmount`,
   /// `otherExpense` and `finalDate` are their totals; batches delivered before this keep only the totals.
   deliveries                     FabricFlowDelivery[]
@@ -799,6 +878,7 @@ model FabricProductionFlow {
   @@index([knittingMillType, status])
   @@index([yarnItemCode, createdAt])
   @@index([piNo])
+  @@index([parentId])
 }
 
 /// A dated operating cost recorded against one production batch.
@@ -845,6 +925,9 @@ model FabricFlowDelivery {
   /// Fabric sent into a warehouse waits there until its staff receive it; only then is it stock (`stockTxnId`).
   receivedAt       DateTime?
   receivedWeightKg Decimal?                  @db.Decimal(14, 3)
+  /// Rolls / bags the warehouse counted, to check against the challan; and what it noted on receipt.
+  receivedPackages Int?
+  receivedNotes    String?
   receivedById     String?
   stockTxnId       String?
   createdById      String?
@@ -853,6 +936,44 @@ model FabricFlowDelivery {
   @@index([flowId])
   @@index([warehouseId, receivedAt])
   @@index([processStage, receivedAt])
+  @@index([processStage, destination, deliveredAt])
+}
+
+/// A delivery challan for a batch's fabric leaving one place for the next: knitting to dyeing or a warehouse, a
+/// warehouse to dyeing / compacting, dyeing to compacting or a warehouse, and each delivery of the finished fabric.
+/// Issued when the process finishes or the fabric is sent; a correction keeps its number, an undone delivery cancels it.
+model ProcessChallan {
+  id           String               @id @default(uuid())
+  /// PDC-2026-000001
+  challanNo    String               @unique
+  flowId       String
+  flow         FabricProductionFlow @relation(fields: [flowId], references: [id], onDelete: Cascade)
+  /// Which hand-off: KNITTING, DYEING_IN, DYEING, COMPACTING_IN or DELIVERY:<delivery id>.
+  handOff      String
+  date         DateTime
+  /// Grey fabric, dyed fabric or finished fabric.
+  material     String
+  /// PROCESS (a mill) or WAREHOUSE, and its name.
+  fromKind     String
+  fromName     String
+  /// PROCESS (the next mill), WAREHOUSE or PARTY, and its name.
+  toKind       String
+  toName       String
+  weightKg     Decimal              @db.Decimal(14, 3)
+  /// Bags or rolls, when counted.
+  packages     Int?
+  packageUnit  String?
+  vehicleNo    String?
+  driverName   String?
+  notes        String?
+  createdById  String?
+  cancelledAt  DateTime?
+  cancelReason String?
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+
+  @@unique([flowId, handOff])
+  @@index([date])
 }
 
 /// A document or photo attached to a production batch (e.g. the knitting delivery challan), kept in file storage.
@@ -941,6 +1062,8 @@ model Sale {
   updatedAt     DateTime           @updatedAt
 
   @@index([status, warehouseId])
+  @@index([status, saleDate])
+  @@index([status, dispatchedAt])
   @@index([saleDate])
   @@index([supplierId])
   @@index([textileId])
@@ -998,4 +1121,51 @@ model StockBill {
 
   @@index([warehouseId, createdAt])
   @@index([referenceType, referenceId])
+}
+
+/// Yarn received into a warehouse from a mill, directly or through an agent, as the yarn received register keeps it:
+/// one mill delivery challan (DC) with one or more counts. Each count is a line with its own yarn code (01SS26…).
+model YarnReceipt {
+  id          String            @id @default(uuid())
+  /// YR-2026-000001
+  receiptNo   String            @unique
+  receivedAt  DateTime
+  /// The mill's delivery challan number.
+  dcNo        String
+  millName    String
+  /// Who it was bought through; null when bought direct from the mill.
+  agentName   String?
+  warehouseId String
+  warehouse   Warehouse         @relation(fields: [warehouseId], references: [id])
+  vehicleNo   String?
+  notes       String?
+  createdById String?
+  lines       YarnReceiptLine[]
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@index([receivedAt])
+  @@index([millName])
+}
+
+/// One count on a yarn receipt: its bags, weight and rate, and the yarn code its stock is kept under.
+model YarnReceiptLine {
+  id         String      @id @default(uuid())
+  receiptId  String
+  receipt    YarnReceipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  /// The yarn count as written, e.g. 36'S VL: the stock item's name.
+  count      String
+  /// Bags as written on the DC ("30+9"), and their total.
+  bags       String?
+  bagCount   Int?
+  /// As weighed at the godown: the stock.
+  weightKg   Decimal     @db.Decimal(14, 3)
+  /// As written on the mill's DC, to check the godown's weight against.
+  dcWeightKg Decimal?    @db.Decimal(14, 3)
+  ratePerKg  Decimal?    @db.Decimal(12, 2)
+  /// The yarn code (01SS26) this count is in stock as.
+  itemCode   String      @unique
+  stockTxnId String?
+
+  @@index([receiptId])
 }

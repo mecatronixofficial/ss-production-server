@@ -31,6 +31,9 @@ type SaleWithItems = Prisma.SaleGetPayload<{ include: typeof saleInclude }>;
  * number; the warehouse is notified, and its staff verify what is loaded and dispatch it, which takes the stock
  * out, or send it back with what is wrong.
  */
+/** A dispatched bill still unpaid after this many days is pointed out on the Sales page. */
+const OVERDUE_DAYS = 30;
+
 @Injectable()
 export class SalesService {
   constructor(
@@ -62,6 +65,81 @@ export class SalesService {
     const users = ids.length ? await this.prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } }) : [];
     const name = (id: string | null) => users.find((u) => u.id === id)?.name ?? null;
     return { createdBy: name(sale.createdById), verifiedBy: name(sale.verifiedById) };
+  }
+
+  /**
+   * The Sales page's figures over every sale (its register lists the latest 500): how many wait for the warehouse or
+   * were sent back, what was billed this month (dispatched bills by bill date, as on Finance and the Dashboard), what
+   * is still to collect on dispatched bills, the bills unpaid past OVERDUE_DAYS, and the parties owing the most.
+   */
+  async summary() {
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const today = new Date(now);
+    today.setHours(0, 0, 0, 0);
+    const [byStatus, dispatched, monthKg, paid] = await Promise.all([
+      this.prisma.sale.groupBy({ by: ['status'], _count: { _all: true } }),
+      this.prisma.sale.findMany({
+        where: { status: SaleStatus.DISPATCHED },
+        select: { id: true, partyType: true, partyName: true, supplierId: true, textileId: true, totalAmount: true, saleDate: true, dispatchedAt: true },
+      }),
+      this.prisma.saleItem.aggregate({
+        where: { unit: { equals: 'KG', mode: 'insensitive' }, sale: { status: SaleStatus.DISPATCHED, saleDate: { gte: monthStart } } },
+        _sum: { dispatchedQty: true },
+      }),
+      saleMoney(this.prisma, null),
+    ]);
+
+    const counts = { PENDING: 0, REJECTED: 0, DISPATCHED: 0, CANCELLED: 0, all: 0 };
+    for (const row of byStatus) {
+      counts[row.status] = row._count._all;
+      counts.all += row._count._all;
+    }
+    const round2 = (v: number) => Math.round(v * 100) / 100;
+    const billedMonth = { count: 0, amount: 0, kg: Number(monthKg._sum.dispatchedQty ?? 0), distributor: 0, textile: 0 };
+    const toCollect = { amount: 0, bills: 0, cheques: 0 };
+    const overdue = { days: OVERDUE_DAYS, count: 0, amount: 0 };
+    let billedTotal = 0;
+    const parties = new Map<string, { name: string; type: SalePartyType; due: number; bills: number; oldestDays: number }>();
+    for (const sale of dispatched) {
+      const total = Number(sale.totalAmount);
+      billedTotal += total;
+      if (sale.saleDate >= monthStart) {
+        billedMonth.count += 1;
+        billedMonth.amount += total;
+        billedMonth[sale.partyType === SalePartyType.TEXTILE ? 'textile' : 'distributor'] += total;
+      }
+      const payment = salePayment(total, paid.get(sale.id));
+      if (payment.due < 0.005) continue;
+      // Days since the fabric left (or the bill date, for a bill without a dispatch time).
+      const since = new Date(sale.dispatchedAt ?? sale.saleDate);
+      since.setHours(0, 0, 0, 0);
+      const days = Math.max(0, Math.round((today.getTime() - since.getTime()) / 86_400_000));
+      toCollect.amount += payment.due;
+      toCollect.bills += 1;
+      toCollect.cheques += payment.pending;
+      if (days > OVERDUE_DAYS) {
+        overdue.count += 1;
+        overdue.amount += payment.due;
+      }
+      const key = sale.supplierId ?? sale.textileId ?? `name:${sale.partyName.trim().toUpperCase()}`;
+      const party = parties.get(key) ?? { name: sale.partyName, type: sale.partyType, due: 0, bills: 0, oldestDays: 0 };
+      party.due += payment.due;
+      party.bills += 1;
+      party.oldestDays = Math.max(party.oldestDays, days);
+      parties.set(key, party);
+    }
+    return {
+      counts,
+      billedMonth: { ...billedMonth, amount: round2(billedMonth.amount), distributor: round2(billedMonth.distributor), textile: round2(billedMonth.textile) },
+      billedTotal: round2(billedTotal),
+      toCollect: { amount: round2(toCollect.amount), bills: toCollect.bills, cheques: round2(toCollect.cheques) },
+      overdue: { ...overdue, amount: round2(overdue.amount) },
+      topDue: [...parties.values()]
+        .sort((a, b) => b.due - a.due)
+        .slice(0, 6)
+        .map((p) => ({ ...p, due: round2(p.due) })),
+    };
   }
 
   async list(user: AuthUser) {

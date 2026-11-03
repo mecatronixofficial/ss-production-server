@@ -22,6 +22,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { GODOWN_ROLES, GODOWN_VIEW_ROLES, MACHINE_ROLES } from '../common/roles';
 import { ProductionService } from './production.service';
+import { ProcessChallansService } from './process-challans';
 import {
   CreateFabricExpenseDto,
   FinishKnittingDto,
@@ -34,18 +35,36 @@ import {
   StartStockProcessDto,
   UpdateFabricCompactingDto,
   UpdateFabricDyeingDto,
+  UpdateProcessChallanDto,
 } from './dto/fabric-flow.dto';
 
 @Controller('production')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
 @Roles(Role.SUPERADMIN, Role.ADMIN)
 export class ProductionController {
-  constructor(private service: ProductionService) {}
+  constructor(
+    private service: ProductionService,
+    private challans: ProcessChallansService,
+  ) {}
 
   @Get('fabric-flows')
   @Roles(...MACHINE_ROLES)
-  fabricFlows(@CurrentUser() user: AuthUser) {
-    return this.service.fabricFlows(user);
+  fabricFlows(@CurrentUser() user: AuthUser, @Query('view') view?: string) {
+    return this.service.fabricFlows(user, view === 'list');
+  }
+
+  /** One batch by its code, with everything its page shows. */
+  @Get('fabric-flows/code/:flowNo')
+  @Roles(...MACHINE_ROLES)
+  fabricFlowByCode(@Param('flowNo') flowNo: string, @CurrentUser() user: AuthUser) {
+    return this.service.fabricFlowByCode(flowNo, user);
+  }
+
+  /** The floor at a glance: machines running and what they knit, and the yarn and fabric in stock. */
+  @Get('overview')
+  @Roles(...MACHINE_ROLES)
+  overview() {
+    return this.service.overview();
   }
 
   @Get('fabric-flows/directory')
@@ -78,24 +97,24 @@ export class ProductionController {
 
   /** Dyeing started at a party / mill; completed later with POST …/dyeing. */
   @Post('fabric-flows/:id/dyeing/start')
-  startDyeing(@Param('id', ParseUUIDPipe) id: string, @Body() dto: StartDyeingDto) {
-    return this.service.startDyeing(id, dto);
+  startDyeing(@Param('id', ParseUUIDPipe) id: string, @Body() dto: StartDyeingDto, @CurrentUser() user: AuthUser) {
+    return this.service.startDyeing(id, dto, user);
   }
 
   /** Compacting started at a party / mill; completed later with POST …/compacting. */
   @Post('fabric-flows/:id/compacting/start')
-  startCompacting(@Param('id', ParseUUIDPipe) id: string, @Body() dto: StartCompactingDto) {
-    return this.service.startCompacting(id, dto);
+  startCompacting(@Param('id', ParseUUIDPipe) id: string, @Body() dto: StartCompactingDto, @CurrentUser() user: AuthUser) {
+    return this.service.startCompacting(id, dto, user);
   }
 
   @Post('fabric-flows/:id/dyeing')
-  updateFabricDyeing(@Param('id') id: string, @Body() dto: UpdateFabricDyeingDto) {
-    return this.service.updateFabricDyeing(id, dto);
+  updateFabricDyeing(@Param('id') id: string, @Body() dto: UpdateFabricDyeingDto, @CurrentUser() user: AuthUser) {
+    return this.service.updateFabricDyeing(id, dto, user);
   }
 
   @Post('fabric-flows/:id/compacting')
-  updateFabricCompacting(@Param('id') id: string, @Body() dto: UpdateFabricCompactingDto) {
-    return this.service.updateFabricCompacting(id, dto);
+  updateFabricCompacting(@Param('id') id: string, @Body() dto: UpdateFabricCompactingDto, @CurrentUser() user: AuthUser) {
+    return this.service.updateFabricCompacting(id, dto, user);
   }
 
   /** Finished fabric to a party or into a warehouse (as stock under the batch code). */
@@ -159,5 +178,32 @@ export class ProductionController {
   @Delete('fabric-flows/:id/attachments/:attachmentId')
   deleteAttachment(@Param('id', ParseUUIDPipe) id: string, @Param('attachmentId', ParseUUIDPipe) attachmentId: string) {
     return this.service.deleteAttachment(id, attachmentId);
+  }
+
+  // ─── Delivery challans of a batch's fabric between processes ───
+
+  /** Every process delivery challan, newest first; `flowId` for one batch, `from` / `to` as ISO date-times. */
+  @Get('challans')
+  processChallans(@Query('flowId') flowId?: string, @Query('from') from?: string, @Query('to') to?: string) {
+    const date = (value?: string) => (value && !Number.isNaN(Date.parse(value)) ? new Date(value) : undefined);
+    return this.challans.list({ flowId: flowId || undefined, from: date(from), to: date(to) });
+  }
+
+  @Get('challans/:challanId')
+  processChallan(@Param('challanId', ParseUUIDPipe) challanId: string) {
+    return this.challans.document(challanId);
+  }
+
+  /** The challan as a PDF, to share or print. */
+  @Get('challans/:challanId/pdf')
+  async processChallanPdf(@Param('challanId', ParseUUIDPipe) challanId: string) {
+    const { buffer, fileName } = await this.challans.pdf(challanId);
+    return new StreamableFile(buffer, { type: 'application/pdf', disposition: `inline; filename="${fileName}"`, length: buffer.length });
+  }
+
+  /** Vehicle, driver and remarks, filled in when the fabric leaves. */
+  @Patch('challans/:challanId')
+  updateProcessChallan(@Param('challanId', ParseUUIDPipe) challanId: string, @Body() dto: UpdateProcessChallanDto) {
+    return this.challans.update(challanId, dto);
   }
 }

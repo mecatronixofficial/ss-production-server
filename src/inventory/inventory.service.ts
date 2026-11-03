@@ -2,12 +2,14 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { Prisma, StockCategory, StockTransaction, StockTxnType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../common/auth-user';
-import { documentNo } from '../common/numbering';
+import { batchCode, documentNo } from '../common/numbering';
 import { lockKeys } from '../common/locks';
 import { ENTRY_TYPES, GODOWN_CATEGORIES, GodownEntryDto } from './dto/godown-entry.dto';
 import { GODOWN_ENTRY } from './constants';
 import { StockBillsService } from './stock-bills.service';
 import { itemJourney } from './item-journey';
+import { yarnStory } from './yarn-story';
+import { itemSpecs } from '../common/item-specs';
 
 export { GODOWN_ENTRY };
 
@@ -162,7 +164,7 @@ export class InventoryService {
    * the purchase lines it was bought on (with their receipts) and its latest movements.
    */
   async itemDetails(itemCode: string, opts: { prices: boolean } = { prices: false }) {
-    const [balances, movements, purchaseLines, warehouses, story] = await Promise.all([
+    const [balances, movements, purchaseLines, warehouses, story, yarn, specs] = await Promise.all([
       this.balance({ itemCode }),
       this.prisma.stockTransaction.findMany({
         where: { itemCode },
@@ -177,16 +179,20 @@ export class InventoryService {
             select: { id: true, poNo: true, orderDate: true, status: true, supplier: { select: { code: true, name: true } } },
           },
           receiptItems: {
-            include: { purchaseReceipt: { select: { receiptNo: true, receivedAt: true, lotNo: true, warehouse: { select: { code: true } } } } },
+            include: { purchaseReceipt: { select: { receiptNo: true, receivedAt: true, lotNo: true, challanNo: true, warehouse: { select: { code: true } } } } },
           },
         },
       }),
       this.prisma.warehouse.findMany({ select: { id: true, code: true, name: true } }),
       // Its full story: what was made from it, by which machines, dyed, compacted, delivered and sold.
       itemJourney(this.prisma, itemCode, opts),
+      // The yarn behind it, from receipt to every knitting batch and colour, with the weight checked at each step.
+      yarnStory(this.prisma, itemCode),
+      // What it is: count, quality, shade… as ordered; fabric type, dia, GSM, colour… as made.
+      itemSpecs(this.prisma, [itemCode]),
     ]);
     // A batch or run still in process has no stock yet, but it is still a code to show.
-    if (!movements.length && !purchaseLines.length && !story.journey.length && !story.runs.length && !story.sales.length) {
+    if (!movements.length && !purchaseLines.length && !story.journey.length && !story.runs.length && !story.sales.length && !yarn) {
       throw new NotFoundException(`No item with code ${itemCode}`);
     }
     // Production batches this code went into (as yarn) or came out of (as finished fabric).
@@ -222,7 +228,9 @@ export class InventoryService {
     ];
     return {
       itemCode,
-      itemName: names[0],
+      yarnStory: yarn,
+      specs: specs.get(itemCode) ?? [],
+      itemName: names[0] ?? yarn?.yarn.name ?? itemCode,
       otherNames: names.slice(1),
       categories: [...new Set([...balances.map((b) => b.category), ...purchaseLines.flatMap((l) => (l.category ? [l.category] : []))])],
       stock: balances.map((b) => ({ ...b, warehouse: warehouseById.get(b.warehouseId) ?? null })),
@@ -232,7 +240,18 @@ export class InventoryService {
         quantity: Number(line.quantity),
         unit: line.unit,
         rate: opts.prices ? Number(line.rate) : null,
-        receipts: line.receiptItems.map((r) => ({ ...r.purchaseReceipt, quantity: Number(r.quantity) })),
+        /** Its details as ordered. */
+        specs: Array.isArray(line.specs) ? (line.specs as Array<{ label: string; value: string }>) : [],
+        // Each receipt with what was checked: the DC's quantity, bags / rolls, details and each ordered detail.
+        receipts: line.receiptItems.map((r) => ({
+          ...r.purchaseReceipt,
+          quantity: Number(r.quantity),
+          dcQuantity: r.dcQuantity === null ? null : Number(r.dcQuantity),
+          packages: r.packages,
+          packageCount: r.packageCount,
+          details: r.details,
+          checks: Array.isArray(r.checks) ? (r.checks as Array<{ label: string; ordered: string; ok: boolean; received?: string }>) : [],
+        })),
       })),
       movements,
       movementsCapped: movements.length >= ITEM_MOVEMENT_LIMIT,
@@ -330,6 +349,13 @@ export class InventoryService {
 
   // ─── Godown entries ─────────────────────────────────────────────────────
 
+  /** What one stock position holds now, under its lock (so a following issue in the transaction can take all of it). */
+  async availableWithin(tx: Prisma.TransactionClient, position: Omit<StockKey, 'unit'> & { unit?: string }) {
+    const key = keyOf(position);
+    await lockKeys(tx, lockName(key));
+    return this.stockOf(tx, key);
+  }
+
   private async stockOf(tx: Prisma.TransactionClient, k: StockKey) {
     const a = await tx.stockTransaction.aggregate({ where: k, _sum: { quantityIn: true, quantityOut: true } });
     return Number(a._sum.quantityIn ?? 0) - Number(a._sum.quantityOut ?? 0);
@@ -370,7 +396,10 @@ export class InventoryService {
     }
 
     let itemCode = dto.itemCode;
-    if (!itemCode) {
+    if (!itemCode && !current && dto.category === 'YARN' && (dto.txnType === 'PURCHASE_IN' || dto.txnType === 'OPENING')) {
+      // Yarn received into a warehouse gets its own code (01SS26…), followed through knitting, dyeing and delivery.
+      itemCode = await batchCode(this.prisma);
+    } else if (!itemCode) {
       // Reuse the code of an item already in the godown so its stock stays in one row.
       const existing = await this.prisma.stockTransaction.findFirst({
         where: { category: dto.category, itemName: { equals: dto.itemName, mode: 'insensitive' } },

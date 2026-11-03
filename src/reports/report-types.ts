@@ -23,7 +23,6 @@ export type ReportBody = {
   summary: ReportSummaryItem[];
   /** Extra context shown under the table, e.g. how a figure is calculated. */
   note?: string;
-  truncated?: boolean;
 };
 
 export type ReportDefinition = {
@@ -33,10 +32,14 @@ export type ReportDefinition = {
   description: string;
   /** What the date filter applies to; null when the report is always "as of today". */
   dateLabel: string | null;
+  /** The name and figure columns of the "top" chart above the table; null for none. */
+  top?: ReportTop | null;
   build: (range: DateRange, ctx: ReportContext) => Promise<ReportBody>;
 };
 
 export type ReportContext = { timezone: string; now: Date };
+
+export type ReportTop = { label: string; value: string };
 
 export type ReportResult = ReportBody & {
   key: string;
@@ -44,9 +47,12 @@ export type ReportResult = ReportBody & {
   group: ReportGroup;
   description: string;
   dateLabel: string | null;
+  top: ReportTop | null;
   from: string | null;
   to: string | null;
   totals: Record<string, number>;
+  /** The list was cut at ROW_LIMIT rows (the summary and totals still cover every row). */
+  truncated: boolean;
   generatedAt: string;
   company: CompanyHeader;
 };
@@ -74,6 +80,11 @@ export function monthKey(date: Date, timezone: string) {
   const parts = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit' }).formatToParts(date);
   const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
   return `${get('year')}-${get('month')}`;
+}
+
+/** yyyy-mm-dd in the company's time zone. */
+export function dayKey(date: Date, timezone: string) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
 }
 
 export function monthLabel(key: string) {

@@ -114,15 +114,23 @@ describe('Godown entries', () => {
     service = new InventoryService(prisma, new StockBillsService(prisma));
   });
 
-  it('records stock in with a document number and a code derived from the name', async () => {
-    const txn = await service.createEntry(entry(), user);
-    expect(txn).toMatchObject({ itemCode: '30S-COMBED-COTTON', referenceType: GODOWN_ENTRY, quantityIn: 100, quantityOut: 0 });
-    expect(txn.referenceId).toMatch(/^GD-\d{4}-000001$/);
+  it('gives yarn received into a warehouse its own yarn code (01SS26…), one per receipt', async () => {
+    const first = await service.createEntry(entry(), user);
+    const second = await service.createEntry(entry(), user);
+    expect(first).toMatchObject({ referenceType: GODOWN_ENTRY, quantityIn: 100, quantityOut: 0 });
+    expect(first.itemCode).toMatch(/^\d{2,}SS\d{2}$/);
+    expect(second.itemCode).not.toBe(first.itemCode);
+    expect(first.referenceId).toMatch(/^GD-\d{4}-\d{6}$/);
+  });
+
+  it('records other stock in with a code derived from the name', async () => {
+    const txn = await service.createEntry(entry({ category: 'GREY_FABRIC', itemName: 'Single jersey grey' }), user);
+    expect(txn.itemCode).toBe('SINGLE-JERSEY-GREY');
   });
 
   it('reuses the code of an existing item with the same name', async () => {
     await service.createEntry(entry({ itemCode: 'YARN-30S' }), user);
-    const txn = await service.createEntry(entry({ itemName: '30S COMBED COTTON' }), user);
+    const txn = await service.createEntry(entry({ itemName: '30S COMBED COTTON', txnType: 'RETURN_IN' }), user);
     expect(txn.itemCode).toBe('YARN-30S');
   });
 

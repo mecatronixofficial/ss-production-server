@@ -15,9 +15,9 @@ import {
 import { fabricFlowView } from '../production/fabric-flow-view';
 import {
   between,
+  dayKey,
   DateRange,
   iso,
-  limit,
   monthKey,
   monthLabel,
   num,
@@ -29,6 +29,9 @@ import {
 } from './report-types';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const EMPTY = 0.0005;
+/** A production day as yyyy-mm-dd: day entries and finish dates are stored as dates (midnight UTC). */
+const dateOf = (value: Date) => value.toISOString().slice(0, 10);
 const col = (key: string, label: string, type: ReportColumn['type'], total = false): ReportColumn => ({ key, label, type, total });
 const unique = (values: Array<string | null | undefined>) => [...new Set(values.filter(Boolean))].join(', ');
 const count = (values: Array<string | null | undefined>) => new Set(values.filter(Boolean)).size;
@@ -58,9 +61,10 @@ export function reportDefinitions(prisma: PrismaService, money: MoneyService): R
       group: 'Overview',
       description: 'One line per month: yarn received, fabric knitted, sales billed, fabric delivered, and money in / out.',
       dateLabel: 'Activity date',
+      top: { label: 'month', value: 'sales' },
       async build(range: DateRange, ctx) {
         const r = between(range);
-        const [yarnIn, receipts, runs, sales, deliveries, distributorPaid, expenses] = await Promise.all([
+        const [yarnIn, receipts, knitDays, runs, sales, deliveries, distributorPaid, expenses] = await Promise.all([
           prisma.stockTransaction.findMany({
             where: { createdAt: r, category: 'YARN', unit: 'KG', txnType: 'PURCHASE_IN' },
             select: { createdAt: true, quantityIn: true },
@@ -69,7 +73,10 @@ export function reportDefinitions(prisma: PrismaService, money: MoneyService): R
             where: { receivedAt: r },
             select: { receivedAt: true, items: { select: { quantity: true, purchaseOrderItem: { select: { rate: true } } } } },
           }),
-          prisma.knittingRun.findMany({ where: { finishedAt: r, status: 'FINISHED' }, select: { finishedAt: true, outputKg: true } }),
+          // Knitting on the day it was knitted (day entries), as on the Dashboard and Machines pages; a run finished in one
+          // go, before day entries, counts on its finish day.
+          prisma.knittingDayEntry.findMany({ where: { date: r }, select: { date: true, outputKg: true } }),
+          prisma.knittingRun.findMany({ where: { finishedAt: r, status: 'FINISHED', days: { none: {} } }, select: { finishedAt: true, outputKg: true } }),
           // Dispatched bills by bill date, as on Finance.
           prisma.sale.findMany({ where: { saleDate: r, status: 'DISPATCHED' }, select: { saleDate: true, totalAmount: true } }),
           prisma.fabricFlowDelivery.findMany({
@@ -97,6 +104,7 @@ export function reportDefinitions(prisma: PrismaService, money: MoneyService): R
             'purchases',
             sumBy(rc.items, (i) => num(i.quantity) * num(i.purchaseOrderItem.rate)),
           );
+        for (const d of knitDays) add(d.date, 'knittedKg', num(d.outputKg));
         for (const k of runs) if (k.finishedAt) add(k.finishedAt, 'knittedKg', num(k.outputKg));
         for (const sale of sales) add(sale.saleDate, 'sales', num(sale.totalAmount));
         for (const d of deliveries) {
@@ -149,7 +157,7 @@ export function reportDefinitions(prisma: PrismaService, money: MoneyService): R
             { label: 'Paid to distributors', value: total('distributorPaid'), type: 'money' },
             { label: 'Net cash', value: total('net'), type: 'money' },
           ],
-          note: 'Sales billed = dispatched sale bills by bill date, with GST (as on Finance). Money received = receipts on the Money page (a cheque on the day it cleared). Collected = amounts recorded on fabric delivered to parties on the Production page. Net cash = money in - payments - expenses, the same as the Money and Finance pages. Months follow the company time zone.',
+          note: 'Knitted = fabric entered for each production day on the Machines page. Sales billed = dispatched sale bills by bill date, with GST (as on Finance). Money received = receipts on the Money page (a cheque on the day it cleared). Collected = amounts recorded on fabric delivered to parties on the Production page. Net cash = money in - payments - expenses, the same as the Money and Finance pages. Months follow the company time zone.',
         };
       },
     },
@@ -160,6 +168,7 @@ export function reportDefinitions(prisma: PrismaService, money: MoneyService): R
       group: 'Sales',
       description: 'Every sale bill: party, warehouse, taxable value, GST, money received against it and what is still due.',
       dateLabel: 'Bill date',
+      top: { label: 'party', value: 'total' },
       async build(range) {
         const sales = await prisma.sale.findMany({
           where: { saleDate: between(range), status: { not: 'CANCELLED' } },
@@ -209,7 +218,7 @@ export function reportDefinitions(prisma: PrismaService, money: MoneyService): R
             col('payment', 'Payment', 'status'),
             col('status', 'Status', 'status'),
           ],
-          ...limit(rows),
+          rows,
           summary: [
             {
               label: 'Bills dispatched',
@@ -241,6 +250,7 @@ export function reportDefinitions(prisma: PrismaService, money: MoneyService): R
       group: 'Sales',
       description: 'What was sold: quantity dispatched, average rate and value for each item.',
       dateLabel: 'Bill date',
+      top: { label: 'itemName', value: 'amount' },
       async build(range) {
         const items = await prisma.saleItem.findMany({
           where: { sale: { status: 'DISPATCHED', saleDate: between(range) } },
@@ -315,7 +325,7 @@ export function reportDefinitions(prisma: PrismaService, money: MoneyService): R
             col('avgRate', 'Average rate', 'money'),
             col('amount', 'Value (before GST)', 'money', true),
           ],
-          ...limit(rows),
+          rows,
           summary: [
             { label: 'Items sold', value: rows.length, type: 'number', hint: `${count(items.map((i) => i.saleId))} bills` },
             { label: 'Sold by weight', value: kgSold, type: 'kg' },
@@ -332,6 +342,7 @@ export function reportDefinitions(prisma: PrismaService, money: MoneyService): R
       group: 'Sales',
       description: 'What each textile and distributor owes us on sale bills, and what we owe each distributor for goods, as of today.',
       dateLabel: null,
+      top: { label: 'name', value: 'receivable' },
       async build() {
         const { distributors, textiles, totals } = await money.parties();
         const rows = [
@@ -382,7 +393,7 @@ export function reportDefinitions(prisma: PrismaService, money: MoneyService): R
             col('payable', 'To pay', 'money', true),
             col('lastActivity', 'Last activity', 'date'),
           ],
-          ...limit(rows),
+          rows,
           summary: [
             {
               label: 'To collect',
@@ -398,6 +409,81 @@ export function reportDefinitions(prisma: PrismaService, money: MoneyService): R
         };
       },
     },
+    {
+      key: 'receivables-ageing',
+      title: 'Receivables ageing',
+      group: 'Sales',
+      description: 'What each party still owes on dispatched bills, split by how long the bills have been out: 0–30, 31–60, 61–90 and over 90 days.',
+      dateLabel: null,
+      top: { label: 'party', value: 'due' },
+      async build(_range, ctx) {
+        const [sales, paid] = await Promise.all([
+          prisma.sale.findMany({
+            where: { status: 'DISPATCHED' },
+            select: { id: true, saleNo: true, partyName: true, partyType: true, supplierId: true, textileId: true, totalAmount: true, saleDate: true, dispatchedAt: true },
+          }),
+          saleMoney(prisma, null),
+        ]);
+        const today = Date.parse(dayKey(ctx.now, ctx.timezone));
+        type Party = { party: string; partyType: string; bills: number; b30: number; b60: number; b90: number; over90: number; due: number; cheques: number; oldestDays: number; oldestBill: string };
+        const parties = new Map<string, Party>();
+        for (const sale of sales) {
+          const pay = salePayment(num(sale.totalAmount), paid.get(sale.id));
+          if (pay.due < 0.005) continue;
+          // Days since the fabric left (the bill date for a bill without a dispatch time), on the company calendar.
+          const days = Math.max(0, Math.round((today - Date.parse(dayKey(sale.dispatchedAt ?? sale.saleDate, ctx.timezone))) / DAY_MS));
+          const key = sale.supplierId ?? sale.textileId ?? `name:${sale.partyName.trim().toUpperCase()}`;
+          const p = parties.get(key) ?? { party: sale.partyName, partyType: sale.partyType, bills: 0, b30: 0, b60: 0, b90: 0, over90: 0, due: 0, cheques: 0, oldestDays: -1, oldestBill: '' };
+          p.bills += 1;
+          p.due += pay.due;
+          p.cheques += Math.min(pay.pending, pay.due);
+          p[days <= 30 ? 'b30' : days <= 60 ? 'b60' : days <= 90 ? 'b90' : 'over90'] += pay.due;
+          if (days > p.oldestDays) Object.assign(p, { oldestDays: days, oldestBill: sale.saleNo });
+          parties.set(key, p);
+        }
+        const rows = [...parties.values()]
+          .sort((a, b) => b.due - a.due)
+          .map((p) => ({
+            party: p.party,
+            partyType: p.partyType,
+            bills: p.bills,
+            b30: round(p.b30, 2),
+            b60: round(p.b60, 2),
+            b90: round(p.b90, 2),
+            over90: round(p.over90, 2),
+            due: round(p.due, 2),
+            cheques: round(p.cheques, 2),
+            oldestDays: p.oldestDays,
+            oldestBill: p.oldestBill,
+          }));
+        const due = sumBy(rows, (r) => r.due);
+        const over30 = sumBy(rows, (r) => r.b60 + r.b90 + r.over90);
+        const over90 = sumBy(rows, (r) => r.over90);
+        return {
+          columns: [
+            col('party', 'Party', 'text'),
+            col('partyType', 'Party type', 'status'),
+            col('bills', 'Bills due', 'number', true),
+            col('b30', '0–30 days', 'money', true),
+            col('b60', '31–60 days', 'money', true),
+            col('b90', '61–90 days', 'money', true),
+            col('over90', 'Over 90 days', 'money', true),
+            col('due', 'Total due', 'money', true),
+            col('cheques', 'Cheques to clear', 'money', true),
+            col('oldestDays', 'Oldest (days)', 'number'),
+            col('oldestBill', 'Oldest bill', 'text'),
+          ],
+          rows,
+          summary: [
+            { label: 'To collect on bills', value: due, type: 'money', hint: `${sumBy(rows, (r) => r.bills)} bills · ${rows.length} parties` },
+            { label: 'Over 30 days', value: over30, type: 'money', hint: due ? `${pct(over30, due)}% of what is due · overdue, as on Sales` : 'Nothing due' },
+            { label: 'Over 90 days', value: over90, type: 'money', hint: over90 ? `${rows.filter((r) => r.over90 > 0.005).length} parties · follow up` : 'None' },
+            { label: 'Cheques to clear', value: sumBy(rows, (r) => r.cheques), type: 'money', hint: 'Received, not cleared yet' },
+          ],
+          note: 'Age = days since the fabric was dispatched (the bill date when there is no dispatch time). Due = bill total - money received against the bill; a cheque counts once it clears, so cheques to clear are still in Due. Money received on account, not against a bill, is not set against these bills: see Party balances.',
+        };
+      },
+    },
 
     // ───────────────────────────── Production ─────────────────────────────
     {
@@ -407,11 +493,13 @@ export function reportDefinitions(prisma: PrismaService, money: MoneyService): R
       description: 'Yarn-to-fabric batches from the Production page: weights, losses, spend, collection and profit.',
       // `purchaseDate` is the knitting start for batches started from stock, the purchase date on older ones.
       dateLabel: 'Start date',
+      top: { label: 'flowNo', value: 'profit' },
       async build(range) {
         const flows = await prisma.fabricProductionFlow.findMany({
           where: { purchaseDate: between(range) },
           // Dated batch expenses are part of spend, the same as on the Production page.
-          include: { expenses: { select: { amount: true } } },
+          // A knitting batch counts only what is not yet in its dyeing lots, which are rows of their own.
+          include: { expenses: { select: { amount: true } }, lots: { select: { purchasedWeightKg: true } } },
           orderBy: { purchaseDate: 'desc' },
         });
         const rows = flows.map((f) => {
@@ -424,7 +512,8 @@ export function reportDefinitions(prisma: PrismaService, money: MoneyService): R
             party: f.knittingPartyDetails ?? f.partyDetails,
             mill: f.knittingMillDetails ?? f.millDetails,
             yarnCount: f.yarnCount,
-            purchasedKg: round(v.purchasedWeightKg),
+            // A dyeing lot's input is grey fabric from its knitting batch, whose yarn is counted there.
+            purchasedKg: f.parentId ? 0 : round(v.purchasedWeightKg),
             currentKg: round(v.metrics.currentWeightKg),
             lossKg: round(v.metrics.totalLossKg),
             lossPct: round(v.metrics.lossPct, 1),
@@ -453,7 +542,7 @@ export function reportDefinitions(prisma: PrismaService, money: MoneyService): R
             col('profit', 'Profit', 'money', true),
             col('status', 'Stage', 'status'),
           ],
-          ...limit(rows),
+          rows,
           summary: [
             { label: 'Batches', value: rows.length, type: 'number' },
             { label: 'Loss', value: loss, type: 'kg', hint: `${pct(loss, purchased)}% of purchased yarn` },
@@ -471,6 +560,7 @@ export function reportDefinitions(prisma: PrismaService, money: MoneyService): R
       group: 'Purchases',
       description: 'Distributor POs with ordered, received and pending value.',
       dateLabel: 'PO date',
+      top: { label: 'supplier', value: 'orderedValue' },
       async build(range) {
         const pos = await prisma.purchaseOrder.findMany({
           where: { orderDate: between(range) },
@@ -515,7 +605,7 @@ export function reportDefinitions(prisma: PrismaService, money: MoneyService): R
             col('lastReceipt', 'Last GRN', 'date'),
             col('status', 'Status', 'status'),
           ],
-          ...limit(rows),
+          rows,
           summary: [
             { label: 'Purchase orders', value: live.length, type: 'number' },
             { label: 'Ordered value', value: sumBy(live, (r) => r.orderedValue), type: 'money' },
@@ -532,6 +622,7 @@ export function reportDefinitions(prisma: PrismaService, money: MoneyService): R
       group: 'Purchases',
       description: 'Every receipt against a PO: distributor, warehouse, items, quantity and value at the PO rate.',
       dateLabel: 'Received date',
+      top: { label: 'supplier', value: 'value' },
       async build(range) {
         const receipts = await prisma.purchaseReceipt.findMany({
           where: { receivedAt: between(range) },
@@ -581,7 +672,7 @@ export function reportDefinitions(prisma: PrismaService, money: MoneyService): R
             col('vehicleNo', 'Vehicle', 'text'),
             col('lotNo', 'Lot', 'text'),
           ],
-          ...limit(rows),
+          rows,
           summary: [
             { label: 'Receipts (GRN)', value: rows.length, type: 'number', hint: `${count(rows.map((r) => r.poNo))} POs` },
             { label: 'Weight received', value: sumBy(rows, (r) => r.kg), type: 'kg' },
@@ -598,6 +689,7 @@ export function reportDefinitions(prisma: PrismaService, money: MoneyService): R
       group: 'Purchases',
       description: 'Purchasing and payments per distributor, with each distributor’s balance payable today.',
       dateLabel: 'PO / receipt / payment date',
+      top: { label: 'supplier', value: 'receivedValue' },
       async build(range) {
         const r = between(range);
         const [suppliers, pos, receiptsInRange, receiptsAll, paidInRange, paidAll] = await Promise.all([
@@ -665,7 +757,7 @@ export function reportDefinitions(prisma: PrismaService, money: MoneyService): R
             col('paid', 'Paid', 'money', true),
             col('balance', 'Balance payable today', 'money', true),
           ],
-          ...limit(rows),
+          rows,
           summary: [
             { label: 'Distributors with activity', value: rows.length, type: 'number' },
             { label: 'Ordered value', value: sumBy(rows, (x) => x.orderedValue), type: 'money' },
@@ -684,6 +776,7 @@ export function reportDefinitions(prisma: PrismaService, money: MoneyService): R
       group: 'Inventory',
       description: 'Opening, received, issued and closing quantity for every item and warehouse.',
       dateLabel: 'Movement date',
+      top: null,
       async build(range) {
         const by = ['category', 'itemCode', 'unit', 'warehouseId'] as const;
         const [before, during, names, warehouses] = await Promise.all([
@@ -749,7 +842,7 @@ export function reportDefinitions(prisma: PrismaService, money: MoneyService): R
             col('issued', 'Issued', 'qty'),
             col('closing', 'Closing', 'qty'),
           ],
-          ...limit(rows),
+          rows,
           summary: [
             { label: 'Stock lines', value: rows.length, type: 'number' },
             { label: 'Items in stock', value: rows.filter((r) => r.closing > 0.0005).length, type: 'number' },
@@ -766,74 +859,109 @@ export function reportDefinitions(prisma: PrismaService, money: MoneyService): R
       key: 'machines',
       title: 'Machine utilisation',
       group: 'Machines',
-      description: 'Knitting runs finished on each machine: yarn loaded, fabric taken off, shifts worked and knitting charges.',
-      dateLabel: 'Finish date',
-      async build(range) {
-        const [machines, runs] = await Promise.all([
-          prisma.machine.findMany({ where: { status: { not: 'DISABLED' } }, orderBy: { code: 'asc' } }),
-          prisma.knittingRun.findMany({
-            where: { status: 'FINISHED', finishedAt: between(range) },
-            select: {
-              machineId: true,
-              yarnKg: true,
-              outputKg: true,
-              knittingCharge: true,
-              startedAt: true,
-              startShift: true,
-              finishedAt: true,
-              finishShift: true,
-            },
+      description: 'What each machine knitted: days worked, share of the period it was used, yarn, fabric, rolls and knitting charges.',
+      dateLabel: 'Production day',
+      top: { label: 'code', value: 'fabricKg' },
+      async build(range, ctx) {
+        const r = between(range);
+        const [machines, days, oneGo, finished, firstRun] = await Promise.all([
+          prisma.machine.findMany({ select: { id: true, code: true, name: true, type: true, status: true }, orderBy: { code: 'asc' } }),
+          prisma.knittingDayEntry.findMany({
+            where: { date: r },
+            select: { date: true, outputKg: true, rollCount: true, yarnUsedKg: true, run: { select: { machineId: true, ratePerKg: true } } },
           }),
+          // Runs finished in one go, before day entries: their fabric counts on the finish day.
+          prisma.knittingRun.findMany({
+            where: { status: 'FINISHED', finishedAt: r, days: { none: {} } },
+            select: { machineId: true, finishedAt: true, yarnKg: true, outputKg: true, rollCount: true, knittingCharge: true },
+          }),
+          prisma.knittingRun.groupBy({ by: ['machineId'], where: { status: 'FINISHED', finishedAt: r }, _count: { _all: true } }),
+          prisma.knittingRun.aggregate({ _min: { startedAt: true } }),
         ]);
-        /** Shifts from start to finish, both counted (Day comes before Night on the same date). */
-        const shiftIndex = (date: Date, shift: string) =>
-          Math.floor(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()) / DAY_MS) * 2 + (shift === 'NIGHT' ? 1 : 0);
-        const rows = machines.map((m) => {
-          const mine = runs.filter((run) => run.machineId === m.id);
-          const yarnKg = sumBy(mine, (run) => num(run.yarnKg));
-          const fabricKg = sumBy(mine, (run) => num(run.outputKg));
-          return {
-            code: m.code,
-            machine: m.name,
-            type: m.type ?? '',
-            runs: mine.length,
-            yarnKg: round(yarnKg),
-            fabricKg: round(fabricKg),
-            changePct: yarnKg ? round(((fabricKg - yarnKg) / yarnKg) * 100, 1) : 0,
-            shifts: sumBy(mine, (run) =>
-              run.finishedAt && run.finishShift
-                ? shiftIndex(run.finishedAt, run.finishShift) - shiftIndex(run.startedAt, run.startShift) + 1
-                : 0,
-            ),
-            charges: round(
-              sumBy(mine, (run) => num(run.knittingCharge)),
-              2,
-            ),
-            status: m.status,
-          };
-        });
+        type Work = { days: Set<string>; yarnKg: number; fabricKg: number; rolls: number; charges: number };
+        const work = new Map<string, Work>();
+        const add = (machineId: string, date: Date, w: Omit<Work, 'days'>) => {
+          const row = work.get(machineId) ?? { days: new Set<string>(), yarnKg: 0, fabricKg: 0, rolls: 0, charges: 0 };
+          if (w.fabricKg > EMPTY) row.days.add(dateOf(date));
+          row.yarnKg += w.yarnKg;
+          row.fabricKg += w.fabricKg;
+          row.rolls += w.rolls;
+          row.charges += w.charges;
+          work.set(machineId, row);
+        };
+        for (const d of days) {
+          const fabricKg = num(d.outputKg);
+          // The yarn used is entered at day end; the fabric's weight when it isn't (as on the run).
+          add(d.run.machineId, d.date, { yarnKg: d.yarnUsedKg === null ? fabricKg : num(d.yarnUsedKg), fabricKg, rolls: d.rollCount, charges: fabricKg * num(d.run.ratePerKg) });
+        }
+        for (const run of oneGo)
+          if (run.finishedAt)
+            add(run.machineId, run.finishedAt, { yarnKg: num(run.yarnKg), fabricKg: num(run.outputKg), rolls: run.rollCount ?? 0, charges: num(run.knittingCharge) });
+
+        // Days the machines could have knitted: the period up to today, from the first run ever entered (a period that
+        // starts before knitting was entered here would otherwise look idle).
+        const firstDay = firstRun._min.startedAt ?? undefined;
+        const start = range.from && firstDay ? (range.from > firstDay ? range.from : firstDay) : (range.from ?? firstDay);
+        const end = range.to && range.to < ctx.now ? range.to : ctx.now;
+        const periodDays = start && end > start ? Math.ceil((end.getTime() - start.getTime()) / DAY_MS) : 0;
+        const finishedBy = new Map(finished.map((f) => [f.machineId, f._count._all]));
+        const rows = machines
+          .filter((m) => m.status !== 'DISABLED' || work.has(m.id))
+          .map((m) => {
+            const w = work.get(m.id);
+            const worked = w?.days.size ?? 0;
+            const yarnKg = w?.yarnKg ?? 0;
+            const fabricKg = w?.fabricKg ?? 0;
+            return {
+              code: m.code,
+              machine: m.name,
+              type: m.type ?? '',
+              days: worked,
+              usedPct: Math.min(100, pct(worked, periodDays)),
+              runs: finishedBy.get(m.id) ?? 0,
+              yarnKg: round(yarnKg),
+              fabricKg: round(fabricKg),
+              changePct: yarnKg > EMPTY ? round(((fabricKg - yarnKg) / yarnKg) * 100, 1) : 0,
+              rolls: w?.rolls ?? 0,
+              kgPerDay: worked ? round(fabricKg / worked) : 0,
+              charges: round(w?.charges ?? 0, 2),
+              status: m.status,
+            };
+          });
+        const machineDays = sumBy(rows, (x) => x.days);
+        const inService = rows.filter((x) => x.status !== 'DISABLED').length;
+        const idle = rows.filter((x) => x.status !== 'DISABLED' && !x.days).length;
         return {
           columns: [
             col('code', 'Code', 'text'),
             col('machine', 'Machine', 'text'),
             col('type', 'Type', 'text'),
+            col('days', 'Days knitted', 'number', true),
+            col('usedPct', 'Used', 'pct'),
             col('runs', 'Runs finished', 'number', true),
-            col('yarnKg', 'Yarn loaded (kg)', 'kg', true),
+            col('yarnKg', 'Yarn used (kg)', 'kg', true),
             col('fabricKg', 'Fabric (kg)', 'kg', true),
             col('changePct', 'Change %', 'pct'),
-            col('shifts', 'Shifts', 'number', true),
+            col('rolls', 'Rolls', 'number', true),
+            col('kgPerDay', 'KG / day', 'kg'),
             col('charges', 'Knitting charges', 'money', true),
             col('status', 'Current status', 'status'),
           ],
-          ...limit(rows),
+          rows,
           summary: [
             {
               label: 'Machines',
               value: rows.length,
               type: 'number',
-              hint: `${rows.filter((x) => x.status === 'RUNNING').length} running now`,
+              hint: `${rows.filter((x) => x.status === 'RUNNING').length} running now${idle ? ` · ${idle} knitted nothing` : ''}`,
             },
-            { label: 'Fabric knitted', value: sumBy(rows, (x) => x.fabricKg), type: 'kg', hint: `${sumBy(rows, (x) => x.runs)} runs` },
+            { label: 'Fabric knitted', value: sumBy(rows, (x) => x.fabricKg), type: 'kg', hint: `${machineDays} machine-days · ${sumBy(rows, (x) => x.rolls).toLocaleString('en-IN')} rolls` },
+            {
+              label: 'Average use',
+              value: pct(machineDays, periodDays * inService),
+              type: 'pct',
+              hint: periodDays ? `of ${periodDays} day${periodDays === 1 ? '' : 's'}, across ${inService} machines` : 'Nothing knitted',
+            },
             { label: 'Knitting charges', value: sumBy(rows, (x) => x.charges), type: 'money' },
             {
               label: 'Out of service now',
@@ -841,16 +969,96 @@ export function reportDefinitions(prisma: PrismaService, money: MoneyService): R
               type: 'number',
             },
           ],
+          note: 'Counted by production day from the day entries on the Machines page, so a run still knitting counts too (a run finished in one go, before day entries, counts on its finish day). Used = days the machine knitted ÷ days in the period up to today (from the first run entered here). Yarn used is entered at day end (the fabric weight when it is not); charges = fabric × the run’s rate per KG.',
         };
       },
     },
-
+    {
+      key: 'knitting-daily',
+      title: 'Daily knitting',
+      group: 'Machines',
+      description: 'One line per production day: machines that knitted, fabric taken off, rolls, yarn used, charges and the best machine.',
+      dateLabel: 'Production day',
+      top: null,
+      async build(range) {
+        const r = between(range);
+        const [days, oneGo] = await Promise.all([
+          prisma.knittingDayEntry.findMany({
+            where: { date: r },
+            select: { date: true, outputKg: true, rollCount: true, yarnUsedKg: true, run: { select: { ratePerKg: true, machine: { select: { code: true } } } } },
+          }),
+          prisma.knittingRun.findMany({
+            where: { status: 'FINISHED', finishedAt: r, days: { none: {} } },
+            select: { finishedAt: true, yarnKg: true, outputKg: true, rollCount: true, knittingCharge: true, machine: { select: { code: true } } },
+          }),
+        ]);
+        type Day = { machines: Map<string, number>; yarnKg: number; fabricKg: number; rolls: number; charges: number };
+        const byDay = new Map<string, Day>();
+        const add = (date: Date, machine: string, w: Omit<Day, 'machines'>) => {
+          const key = dateOf(date);
+          const day = byDay.get(key) ?? { machines: new Map<string, number>(), yarnKg: 0, fabricKg: 0, rolls: 0, charges: 0 };
+          day.machines.set(machine, (day.machines.get(machine) ?? 0) + w.fabricKg);
+          day.yarnKg += w.yarnKg;
+          day.fabricKg += w.fabricKg;
+          day.rolls += w.rolls;
+          day.charges += w.charges;
+          byDay.set(key, day);
+        };
+        for (const d of days) {
+          const fabricKg = num(d.outputKg);
+          add(d.date, d.run.machine.code, { yarnKg: d.yarnUsedKg === null ? fabricKg : num(d.yarnUsedKg), fabricKg, rolls: d.rollCount, charges: fabricKg * num(d.run.ratePerKg) });
+        }
+        for (const run of oneGo)
+          if (run.finishedAt)
+            add(run.finishedAt, run.machine.code, { yarnKg: num(run.yarnKg), fabricKg: num(run.outputKg), rolls: run.rollCount ?? 0, charges: num(run.knittingCharge) });
+        const rows = [...byDay.entries()]
+          .sort((a, b) => b[0].localeCompare(a[0]))
+          .map(([date, d]) => {
+            const working = [...d.machines].filter(([, kg]) => kg > EMPTY).sort((a, b) => b[1] - a[1]);
+            return {
+              date: `${date}T00:00:00.000Z`,
+              machines: working.length,
+              fabricKg: round(d.fabricKg),
+              rolls: d.rolls,
+              yarnKg: round(d.yarnKg),
+              kgPerMachine: working.length ? round(d.fabricKg / working.length) : 0,
+              charges: round(d.charges, 2),
+              best: working[0] ? `${working[0][0]} · ${round(working[0][1], 1).toLocaleString('en-IN')} kg` : '',
+            };
+          })
+          .filter((row) => row.fabricKg > EMPTY || row.rolls);
+        const fabric = sumBy(rows, (row) => row.fabricKg);
+        const best = rows.reduce<(typeof rows)[number] | undefined>((top, row) => (!top || row.fabricKg > top.fabricKg ? row : top), undefined);
+        const dayText = (iso: string) => new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+        return {
+          columns: [
+            col('date', 'Production day', 'date'),
+            col('machines', 'Machines', 'number'),
+            col('fabricKg', 'Fabric (kg)', 'kg', true),
+            col('rolls', 'Rolls', 'number', true),
+            col('yarnKg', 'Yarn used (kg)', 'kg', true),
+            col('kgPerMachine', 'KG / machine', 'kg'),
+            col('charges', 'Knitting charges', 'money', true),
+            col('best', 'Best machine', 'text'),
+          ],
+          rows,
+          summary: [
+            { label: 'Days knitted', value: rows.length, type: 'number' },
+            { label: 'Fabric knitted', value: fabric, type: 'kg', hint: `${sumBy(rows, (row) => row.rolls).toLocaleString('en-IN')} rolls` },
+            { label: 'Average a day', value: rows.length ? round(fabric / rows.length) : 0, type: 'kg', hint: rows.length ? `${round(sumBy(rows, (row) => row.machines) / rows.length, 1)} machines a day` : 'Nothing knitted' },
+            ...(best ? [{ label: 'Best day', value: best.fabricKg, type: 'kg' as const, hint: dayText(best.date) }] : []),
+          ],
+          note: 'A production day is the Day shift (9 AM – 9 PM) and the Night shift after it, to 9 AM, as entered on the Machines page. A run finished in one go, before day entries, counts on its finish day.',
+        };
+      },
+    },
     {
       key: 'knitting-runs',
       title: 'Knitting runs',
       group: 'Machines',
       description: 'Each finished run: machine, operator, yarn loaded, fabric taken off, rolls and knitting charge.',
       dateLabel: 'Finish date',
+      top: { label: 'machine', value: 'fabricKg' },
       async build(range) {
         const runs = await prisma.knittingRun.findMany({
           where: { status: 'FINISHED', finishedAt: between(range) },
@@ -904,7 +1112,7 @@ export function reportDefinitions(prisma: PrismaService, money: MoneyService): R
             col('yarnCost', 'Yarn cost', 'money', true),
             col('warehouse', 'Fabric to', 'text'),
           ],
-          ...limit(rows),
+          rows,
           summary: [
             { label: 'Runs finished', value: rows.length, type: 'number', hint: `${count(rows.map((r) => r.machine))} machines` },
             { label: 'Fabric knitted', value: fabric, type: 'kg', hint: `from ${round(yarn).toLocaleString('en-IN')} kg yarn` },
@@ -927,6 +1135,7 @@ export function reportDefinitions(prisma: PrismaService, money: MoneyService): R
       group: 'Finance',
       description: 'Finished fabric delivered from production batches: to which party, how much, and what was collected.',
       dateLabel: 'Delivery date',
+      top: { label: 'to', value: 'weightKg' },
       async build(range) {
         const deliveries = await prisma.fabricFlowDelivery.findMany({
           where: { deliveredAt: between(range), processStage: 'FINAL' },
@@ -957,7 +1166,7 @@ export function reportDefinitions(prisma: PrismaService, money: MoneyService): R
             col('expense', 'Delivery cost', 'money', true),
             col('notes', 'Notes', 'text'),
           ],
-          ...limit(rows),
+          rows,
           summary: [
             { label: 'Delivered', value: sumBy(rows, (r) => r.weightKg), type: 'kg', hint: `${rows.length} deliveries` },
             { label: 'Collected', value: sumBy(rows, (r) => r.amount), type: 'money' },
@@ -972,6 +1181,7 @@ export function reportDefinitions(prisma: PrismaService, money: MoneyService): R
       group: 'Finance',
       description: 'Every expense by category, with payment mode and branch.',
       dateLabel: 'Expense date',
+      top: { label: 'category', value: 'amount' },
       async build(range) {
         const expenses = await prisma.expense.findMany({
           where: { ...EXPENSE_LIVE, expenseDate: between(range) },
@@ -998,7 +1208,7 @@ export function reportDefinitions(prisma: PrismaService, money: MoneyService): R
             col('branch', 'Branch', 'text'),
             col('amount', 'Amount', 'money', true),
           ],
-          ...limit(rows),
+          rows,
           summary: [
             { label: 'Total expenses', value: sumBy(rows, (r) => r.amount), type: 'money', hint: `${rows.length} entries` },
             ...topBy(rows, 'category', 'amount', 3).map(([label, value]) => ({ label, value, type: 'money' as const })),
@@ -1012,6 +1222,7 @@ export function reportDefinitions(prisma: PrismaService, money: MoneyService): R
       group: 'Finance',
       description: 'Every receipt and payment from the Money page: party, mode, account, reference and whether it has counted yet.',
       dateLabel: 'Entry date',
+      top: { label: 'party', value: 'received' },
       async build(range) {
         const txns = await prisma.moneyTransaction.findMany({
           where: { cancelledAt: null, kind: { in: ['RECEIPT', 'PAYMENT'] }, txnDate: between(range) },
@@ -1056,7 +1267,7 @@ export function reportDefinitions(prisma: PrismaService, money: MoneyService): R
             col('chequePending', 'Cheque to clear', 'money', true),
             col('status', 'Status', 'status'),
           ],
-          ...limit(rows),
+          rows,
           summary: [
             { label: 'Received', value: received, type: 'money', hint: `${rows.filter((r) => r.received).length} receipts` },
             { label: 'Paid', value: paid, type: 'money', hint: `${rows.filter((r) => r.paid).length} payments` },
@@ -1073,6 +1284,7 @@ export function reportDefinitions(prisma: PrismaService, money: MoneyService): R
       group: 'Finance',
       description: 'Cheques received and issued that have not cleared or bounced yet, oldest first, as of today.',
       dateLabel: null,
+      top: { label: 'party', value: 'toReceive' },
       async build(_range, ctx) {
         const cheques = await prisma.moneyTransaction.findMany({
           where: CHEQUE_OPEN,
@@ -1110,7 +1322,7 @@ export function reportDefinitions(prisma: PrismaService, money: MoneyService): R
             col('days', 'Days', 'number'),
             col('status', 'Status', 'status'),
           ],
-          ...limit(rows),
+          rows,
           summary: [
             {
               label: 'To receive',
@@ -1132,6 +1344,7 @@ export function reportDefinitions(prisma: PrismaService, money: MoneyService): R
       group: 'Finance',
       description: 'Cash in hand, bank and UPI accounts: opening balance, money in and out, and the balance today.',
       dateLabel: null,
+      top: { label: 'name', value: 'balance' },
       async build() {
         const accounts = await money.accounts();
         const rows = accounts
@@ -1169,7 +1382,7 @@ export function reportDefinitions(prisma: PrismaService, money: MoneyService): R
             col('lastTxnAt', 'Last entry', 'date'),
             col('status', 'Status', 'status'),
           ],
-          ...limit(rows),
+          rows,
           summary: [
             { label: 'Total balance', value: sumBy(live, (r) => r.balance), type: 'money', hint: `${live.length} active accounts` },
             { label: 'Cash in hand', value: byType('CASH'), type: 'money' },

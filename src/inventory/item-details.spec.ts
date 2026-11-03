@@ -4,6 +4,7 @@ import { StockBillsService } from './stock-bills.service';
 import { itemJourney } from './item-journey';
 
 jest.mock('./item-journey', () => ({ itemJourney: jest.fn() }));
+jest.mock('./yarn-story', () => ({ yarnStory: jest.fn().mockResolvedValue(null) }));
 
 describe('Item detail price permissions', () => {
   it.each([false, true])('returns purchase rates only when prices=%s', async (prices) => {
@@ -13,11 +14,12 @@ describe('Item detail price permissions', () => {
       purchaseOrderItem: {
         findMany: jest
           .fn()
-          .mockResolvedValue([{ id: 'line', itemCode: 'Y1', quantity: 100, unit: 'KG', rate: 250, purchaseOrder: {}, receiptItems: [] }]),
+          .mockResolvedValue([{ id: 'line', itemCode: 'Y1', quantity: 100, unit: 'KG', rate: 250, specs: null, purchaseOrder: { poNo: 'PUR-1', supplier: { name: 'Kumar Yarns' } }, receiptItems: [] }]),
       },
       warehouse: { findMany: jest.fn().mockResolvedValue([]) },
       fabricProductionFlow: { findMany: jest.fn().mockResolvedValue([]) },
       knittingRun: { findMany: jest.fn().mockResolvedValue([]) },
+      yarnReceiptLine: { findMany: jest.fn().mockResolvedValue([]) },
     };
     const service = new InventoryService(db as unknown as PrismaService, {} as StockBillsService);
     const result = await service.itemDetails('Y1', { prices });

@@ -8,7 +8,7 @@ export class MachineDto {
   /** Machines are knitting machines; Knitting when left out. */
   @IsOptional() @IsString() @IsNotEmpty() department?: string;
   @IsOptional() @IsString() type?: string;
-  /** Yarn one load takes; 240 KG when left out. */
+  /** Kept from when machines were loaded up to a capacity; work is no longer limited by it. */
   @IsOptional() @IsNumber() @Min(0.001) capacityKg?: number;
   /** Knitting charge per KG of fabric. */
   @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) ratePerKg?: number;

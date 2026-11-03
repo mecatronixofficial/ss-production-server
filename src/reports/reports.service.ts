@@ -3,7 +3,7 @@ import { MoneyService } from '../finance/money.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { reportDefinitions } from './report-definitions';
 import { toExcel, toPdf } from './report-export';
-import { CompanyHeader, DateRange, num, ReportDefinition, ReportResult, round } from './report-types';
+import { CompanyHeader, DateRange, limit, num, ReportDefinition, ReportResult, round } from './report-types';
 
 const DEFAULT_TIMEZONE = 'Asia/Kolkata';
 
@@ -48,6 +48,7 @@ export class ReportsService {
     // "As of today" reports ignore the date filter.
     const effective = definition.dateLabel === null ? {} : range;
     const body = await definition.build(effective, { timezone: company.timezone, now });
+    // Totals cover every row, also when the list itself is cut short below.
     const totals: Record<string, number> = {};
     for (const column of body.columns.filter((c) => c.total)) {
       const digits = column.type === 'money' ? 2 : 3;
@@ -56,17 +57,20 @@ export class ReportsService {
         digits,
       );
     }
+    const { rows, truncated } = limit(body.rows);
     return {
       ...body,
+      rows,
       key: definition.key,
       title: definition.title,
       group: definition.group,
       description: definition.description,
       dateLabel: definition.dateLabel,
+      top: definition.top ?? null,
       from: effective.from?.toISOString() ?? null,
       to: effective.to?.toISOString() ?? null,
       totals,
-      truncated: body.truncated ?? false,
+      truncated,
       generatedAt: now.toISOString(),
       company,
     };

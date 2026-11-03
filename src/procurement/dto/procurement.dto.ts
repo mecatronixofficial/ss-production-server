@@ -1,7 +1,9 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsDateString,
   IsEnum,
   IsNotEmpty,
@@ -9,17 +11,39 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Matches,
   MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
 import { StockCategory } from '@prisma/client';
+import { PACKAGES_PATTERN } from '../../common/packages';
 
 /** No item code: each line gets its own SS-<year>-<n> code when it is first received. */
+/** One detail of a purchase line, e.g. { label: 'Count', value: "36'S" }. */
+export class PurchaseItemSpecDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(40)
+  label!: string;
+
+  @IsString()
+  @MaxLength(120)
+  value!: string;
+}
+
 export class PurchaseOrderItemDto {
   @IsString()
   @IsNotEmpty()
   itemName!: string;
+
+  /** Its details by material (yarn count, quality, blend, mill, bags…; fabric type, dia, GSM, colour…). */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @ValidateNested({ each: true })
+  @Type(() => PurchaseItemSpecDto)
+  specs?: PurchaseItemSpecDto[];
 
   /** The stock the line becomes when received. */
   @IsEnum(StockCategory)
@@ -66,13 +90,62 @@ export class ClosePurchaseOrderDto {
   reason?: string;
 }
 
+/** One ordered detail as checked at receipt: it matched, or what came instead. */
+export class ReceiptDetailCheckDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(40)
+  label!: string;
+
+  @IsString()
+  @MaxLength(120)
+  ordered!: string;
+
+  @IsBoolean()
+  ok!: boolean;
+
+  /** What came, when it differs from what was ordered. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  received?: string;
+}
+
 export class PurchaseReceiptItemDto {
   @IsUUID()
   purchaseOrderItemId!: string;
 
+  /** What arrived, as weighed / counted at the godown. */
   @IsNumber({ maxDecimalPlaces: 3 })
   @Min(0.001)
   quantity!: number;
+
+  /** The quantity written on the distributor's DC, to check against. */
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 3 })
+  @Min(0.001)
+  dcQuantity?: number;
+
+  /** Bags / rolls as written, e.g. 12 or 30+9. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  @Matches(PACKAGES_PATTERN, { message: 'Write bags / rolls as numbers, e.g. 12 or 30+9' })
+  packages?: string;
+
+  /** The count, shade or anything noted for the line. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(160)
+  details?: string;
+
+  /** Each detail ordered, checked against what came. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @ValidateNested({ each: true })
+  @Type(() => ReceiptDetailCheckDto)
+  checks?: ReceiptDetailCheckDto[];
 }
 
 export class ReceivePurchaseOrderDto {

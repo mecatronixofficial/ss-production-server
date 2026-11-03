@@ -76,7 +76,7 @@ export class StockBillsService {
   /** What each source is called, the party / vehicle it gives the challan, and the documents it refers to. */
   private async sources(refs: SourceRef[], db: Db = this.prisma) {
     const ids = (type: string) => [...new Set(refs.filter((r) => r.referenceType === type).map((r) => r.referenceId))];
-    const [sales, receipts, flows, runs] = await Promise.all([
+    const [sales, receipts, flows, runs, yarnReceipts] = await Promise.all([
       ids('SALE').length
         ? db.sale.findMany({
             where: { id: { in: ids('SALE') } },
@@ -136,6 +136,9 @@ export class StockBillsService {
               operator: { select: { name: true } },
             },
           })
+        : [],
+      ids('YARN_RECEIPT').length
+        ? db.yarnReceipt.findMany({ where: { id: { in: ids('YARN_RECEIPT') } }, select: { id: true, receiptNo: true, dcNo: true, millName: true, agentName: true, vehicleNo: true } })
         : [],
     ]);
     return (r: SourceRef): Source => {
@@ -213,6 +216,17 @@ export class StockBillsService {
                 ]
               : [],
           };
+        }
+        case 'YARN_RECEIPT': {
+          const receipt = yarnReceipts.find((x) => x.id === r.referenceId);
+          return receipt
+            ? {
+                label: `Yarn received ${receipt.receiptNo} · DC ${receipt.dcNo}`,
+                partyName: receipt.millName,
+                vehicleNo: receipt.vehicleNo,
+                references: [...ref('Mill DC', receipt.dcNo), ...ref('Agent', receipt.agentName ?? 'Direct'), ...ref('Yarn receipt', receipt.receiptNo)],
+              }
+            : { label: 'Yarn received', partyName: null, vehicleNo: null, references: [] };
         }
         case GODOWN_ENTRY:
           return {
@@ -498,6 +512,12 @@ export class StockBillsService {
    * Challans, newest first: one warehouse's (and how many of its movements still have none), or every warehouse's for
    * the office register, optionally within dates and of one kind.
    */
+  /** How many movements still have no challan, without loading the challans themselves. */
+  async unbilledCount(warehouseId?: string) {
+    const unbilled = await this.prisma.stockTransaction.count({ where: { stockBillId: null, billWaivedAt: null, ...(warehouseId ? { warehouseId } : {}) } });
+    return { unbilled };
+  }
+
   async list(params: { warehouseId?: string; from?: Date; to?: Date; kind?: StockBillKind }) {
     const where: Prisma.StockBillWhereInput = {
       ...(params.warehouseId ? { warehouseId: params.warehouseId } : {}),

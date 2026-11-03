@@ -3,7 +3,7 @@ import { AuthGuard } from '@nestjs/passport';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { ADMIN_ROLES } from '../common/roles';
-import { PeriodDto } from './dto/money.dto';
+import { PeriodDto, PnlQueryDto } from './dto/money.dto';
 import { FinanceService } from './finance.service';
 
 /**
@@ -23,5 +23,10 @@ export class FinanceController {
   /** Earned vs spent, cash flow, month by month and the position now, for `from`..`to` (ISO date-times). */
   @Get('overview') overview(@Query() period: PeriodDto) {
     return this.finance.overview(period.from, period.to);
+  }
+
+  /** Profit and loss by day, week, month or financial year for `from`..`to`. */
+  @Get('pnl') pnl(@Query() query: PnlQueryDto) {
+    return this.finance.pnl(query.from, query.to, query.group, query.tz ?? 0);
   }
 }

@@ -14,10 +14,11 @@ const kg = (value: unknown) =>
 
 /**
  * Everything the ERP knows about each item code, for challans and bills:
- * - a production batch's fabric (code = batch, e.g. SS-2026-003-D1): type, diameter, GSM, GG, LL, colour, yarn, rolls;
- * - grey fabric off a knitting run (code = run, e.g. SS-2026-014): fabric, machine, rolls, the yarns knitted, and its
+ * - a production batch's fabric (code = batch, e.g. 01SS26-KT01 or a dyeing lot 01SS26-KT01-DY01): type, diameter, GSM, GG, LL, colour, yarn, rolls;
+ * - grey fabric off a knitting run (code = run, e.g. 01SS26-KT01-R1): fabric, machine, rolls, the yarns knitted, and its
  *   batch's construction when it was knitted for one;
- * - purchased material (code given on its first receipt): material, distributor and PO.
+ * - purchased material (code given on its first receipt): material, its details as ordered, distributor and PO;
+ * - yarn from the yarn received register: count, bags, mill, agent and the mill's DC.
  * No prices: challans and bills go to parties, so rates are shown in their own columns, to admins only.
  */
 export async function itemSpecs(db: Db, codes: Array<string | null | undefined>) {
@@ -40,7 +41,7 @@ export async function itemSpecs(db: Db, codes: Array<string | null | undefined>)
     rollCount: true,
     knittingBagCount: true,
   } satisfies Prisma.FabricProductionFlowSelect;
-  const [flows, runs, poItems] = await Promise.all([
+  const [flows, runs, poItems, received] = await Promise.all([
     db.fabricProductionFlow.findMany({ where: { flowNo: { in: wanted } }, select: flowSelect }),
     db.knittingRun.findMany({
       where: { runNo: { in: wanted } },
@@ -62,9 +63,14 @@ export async function itemSpecs(db: Db, codes: Array<string | null | undefined>)
         itemCode: true,
         itemName: true,
         category: true,
+        specs: true,
         purchaseOrder: { select: { poNo: true, orderDate: true, supplier: { select: { name: true } } } },
       },
       orderBy: { purchaseOrder: { orderDate: 'desc' } },
+    }),
+    db.yarnReceiptLine.findMany({
+      where: { itemCode: { in: wanted } },
+      select: { itemCode: true, count: true, bags: true, bagCount: true, receipt: { select: { dcNo: true, millName: true, agentName: true } } },
     }),
   ]);
 
@@ -78,7 +84,8 @@ export async function itemSpecs(db: Db, codes: Array<string | null | undefined>)
     add(specs, 'Count', flow.dyeingCount ?? flow.yarnCount);
     add(specs, 'Yarn', flow.yarnItemCode);
     add(specs, 'Rolls', flow.rollCount);
-    add(specs, 'Bags', flow.knittingBagCount);
+    // Knitting's grey rolls, when the fabric has no later roll count.
+    add(specs, 'Rolls', flow.knittingBagCount);
     add(specs, 'Batch', flow.flowNo);
   };
 
@@ -98,11 +105,27 @@ export async function itemSpecs(db: Db, codes: Array<string | null | undefined>)
     if (run.productionFlow) flowSpecs(specs, run.productionFlow);
     result.set(run.runNo, specs);
   }
+  // Yarn received in the register: its count, bags and the mill's DC.
+  for (const line of received) {
+    const specs: ItemSpec[] = [];
+    add(specs, 'Count', line.count);
+    add(specs, 'Bags', line.bags && line.bagCount !== null && line.bags !== String(line.bagCount) ? `${line.bags} = ${line.bagCount}` : line.bags);
+    add(specs, 'Mill', line.receipt.millName);
+    add(specs, 'Agent', line.receipt.agentName ?? 'Direct');
+    add(specs, 'Mill DC', line.receipt.dcNo);
+    result.set(line.itemCode, specs);
+  }
   // Latest order of each code first, so a code bought twice shows its newest purchase.
   for (const item of poItems) {
     if (!item.itemCode || result.has(item.itemCode)) continue;
     const specs: ItemSpec[] = [];
     add(specs, 'Material', item.category ? item.category.replaceAll('_', ' ').toLowerCase() : null);
+    // Its details as ordered: count, quality, blend, mill… or fabric type, dia, GSM, colour…
+    if (Array.isArray(item.specs)) {
+      for (const s of item.specs as Array<{ label?: unknown; value?: unknown }>) {
+        if (typeof s?.label === 'string' && (typeof s.value === 'string' || typeof s.value === 'number')) add(specs, s.label, s.value);
+      }
+    }
     add(specs, 'Distributor', item.purchaseOrder.supplier.name);
     add(specs, 'PO', item.purchaseOrder.poNo);
     result.set(item.itemCode, specs);

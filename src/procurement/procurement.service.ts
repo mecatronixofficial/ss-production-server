@@ -2,6 +2,8 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { Prisma, PurchaseOrderStatus, Role } from '@prisma/client';
 import { AuthUser } from '../common/auth-user';
 import { batchCode, documentNo } from '../common/numbering';
+import { checkText, packageTotal, packageUnitOf } from '../common/packages';
+import { yarnUsage } from '../inventory/yarn-usage';
 import { lockKeys } from '../common/locks';
 import { purchaseUnit, stockQuantity } from '../common/units';
 import { itemSpecs } from '../common/item-specs';
@@ -27,6 +29,39 @@ const purchaseOrderInclude = {
 type PurchaseOrderRow = Prisma.PurchaseOrderGetPayload<{ include: typeof purchaseOrderInclude }>;
 
 const blank = (value?: string | null) => value?.trim() || undefined;
+
+/** A line's details as stored: trimmed, without empty ones or repeated labels; none at all as null. */
+/** The challan's note of a line's checked details: "All details checked" or what differed. */
+function checkedSpecs(checks: Prisma.JsonValue | null) {
+  if (!Array.isArray(checks) || !checks.length) return [];
+  const rows = checks as Array<{ label: string; ordered: string; ok: boolean; received?: string }>;
+  const off = differences(rows);
+  return [{ label: 'Checked', value: off ? `Differs · ${off}` : `All ${rows.length} details as ordered` }];
+}
+
+/** A line's checked details as stored (without blank labels); none as null. */
+export function checksOf(checks?: Array<{ label: string; ordered: string; ok: boolean; received?: string }>) {
+  const kept = (checks ?? [])
+    .filter((c) => c.label.trim())
+    .map((c) => ({ label: c.label.trim(), ordered: c.ordered.trim(), ok: c.ok, received: c.ok ? c.ordered.trim() : (c.received?.trim() ?? '') }));
+  return kept.length ? kept : Prisma.DbNull;
+}
+
+/** "Shade: ordered Raw white, came Off white" for every detail that didn't match; null when all did. */
+export function differences(checks?: Array<{ label: string; ordered: string; ok: boolean; received?: string | null }> | null) {
+  const off = (checks ?? []).filter((c) => !c.ok);
+  return off.length ? off.map((c) => `${c.label}: ordered ${c.ordered}, came ${c.received?.trim() || 'different'}`).join('; ') : null;
+}
+
+export function specsOf(specs?: Array<{ label: string; value: string }>) {
+  const kept: Array<{ label: string; value: string }> = [];
+  for (const s of specs ?? []) {
+    const label = s.label.trim();
+    const value = s.value.trim();
+    if (label && value && !kept.some((k) => k.label.toLowerCase() === label.toLowerCase())) kept.push({ label, value });
+  }
+  return kept.length ? kept : Prisma.DbNull;
+}
 const receivedOf = (item: { receiptItems: Array<{ quantity: Prisma.Decimal }> }) =>
   item.receiptItems.reduce((sum, r) => sum + Number(r.quantity), 0);
 
@@ -76,6 +111,66 @@ export class ProcurementService {
   }
 
   /** Open POs being delivered to a warehouse, soonest expected first: what its staff are waiting to receive. */
+  /**
+   * Every yarn line ordered (cancelled orders left out), newest order first: its details as ordered, ordered against
+   * received and still to come, each receipt with the distributor's DC and what was checked (DC quantity, bags,
+   * details), its yarn code, where that yarn is now and the knitting it went into. Rates for admins.
+   */
+  async yarnLines(user: AuthUser) {
+    const prices = canSeePrices(user);
+    const lines = await this.prisma.purchaseOrderItem.findMany({
+      where: { category: 'YARN', purchaseOrder: { status: { not: PurchaseOrderStatus.CANCELLED } } },
+      include: {
+        purchaseOrder: {
+          select: { id: true, poNo: true, orderDate: true, expectedDate: true, status: true, supplier: { select: { code: true, name: true } }, warehouse: { select: { code: true } } },
+        },
+        receiptItems: {
+          include: { purchaseReceipt: { select: { id: true, receiptNo: true, receivedAt: true, challanNo: true, vehicleNo: true, lotNo: true, warehouse: { select: { code: true } } } } },
+        },
+      },
+      orderBy: [{ purchaseOrder: { orderDate: 'desc' } }, { id: 'asc' }],
+      take: 3000,
+    });
+    const usage = await yarnUsage(this.prisma, lines.map((l) => l.itemCode));
+    const round = (v: number) => Math.round(v * 1000) / 1000;
+    return lines.map((line) => {
+      const ordered = Number(line.quantity);
+      const received = line.receiptItems.reduce((sum, r) => sum + Number(r.quantity), 0);
+      const rate = prices ? Number(line.rate) : null;
+      return {
+        id: line.id,
+        po: line.purchaseOrder,
+        itemName: line.itemName,
+        itemCode: line.itemCode,
+        unit: line.unit,
+        specs: Array.isArray(line.specs) ? (line.specs as Array<{ label: string; value: string }>) : [],
+        orderedQty: ordered,
+        receivedQty: round(received),
+        balanceQty: round(Math.max(0, ordered - received)),
+        rate,
+        amount: rate === null ? null : Math.round(ordered * rate * 100) / 100,
+        receipts: line.receiptItems
+          .map((r) => ({
+            id: r.purchaseReceipt.id,
+            receiptNo: r.purchaseReceipt.receiptNo,
+            receivedAt: r.purchaseReceipt.receivedAt,
+            dcNo: r.purchaseReceipt.challanNo,
+            vehicleNo: r.purchaseReceipt.vehicleNo,
+            lotNo: r.purchaseReceipt.lotNo,
+            warehouse: r.purchaseReceipt.warehouse.code,
+            quantity: Number(r.quantity),
+            dcQuantity: r.dcQuantity === null ? null : Number(r.dcQuantity),
+            packages: r.packages,
+            packageCount: r.packageCount,
+            details: r.details,
+            checks: Array.isArray(r.checks) ? (r.checks as Array<{ label: string; ordered: string; ok: boolean; received?: string }>) : [],
+          }))
+          .sort((a, b) => a.receivedAt.getTime() - b.receivedAt.getTime()),
+        usage: line.itemCode ? (usage.get(line.itemCode) ?? null) : null,
+      };
+    });
+  }
+
   async incoming(warehouseId: string, user: AuthUser) {
     const rows = await this.prisma.purchaseOrder.findMany({
       where: { warehouseId, status: { in: OPEN_STATUSES } },
@@ -186,8 +281,20 @@ export class ProcurementService {
           balance: Math.max(0, ordered - receivedBefore - quantity),
           rate,
           amount: rate === null ? null : Math.round(quantity * rate * 100) / 100,
-          // What else is known about the item (for fabric: type, dia, GSM, GG, LL, colour…), plus this receipt's lot.
-          specs: [...(receipt.lotNo ? [{ label: 'Lot', value: receipt.lotNo }] : []), ...(item.itemCode ? (specs.get(item.itemCode) ?? []) : []).filter((s) => s.label !== 'PO')],
+          dcQuantity: line.dcQuantity === null ? null : Number(line.dcQuantity),
+          packages: line.packages,
+          packageCount: line.packageCount,
+          details: line.details,
+          // What was checked at receipt (bags / rolls, the DC's quantity, details), what else is known about the item
+          // (for fabric: type, dia, GSM, GG, LL, colour…), and this receipt's lot.
+          specs: [
+            ...(line.packages ? [{ label: packageUnitOf(item.category ?? receipt.category).replace(/^./, (c) => c.toUpperCase()), value: line.packageCount !== null && line.packages !== String(line.packageCount) ? `${line.packages} = ${line.packageCount}` : line.packages }] : []),
+            ...(line.dcQuantity !== null ? [{ label: 'On DC', value: `${Number(line.dcQuantity)} ${item.unit} · ${checkText(Number(line.dcQuantity), quantity, item.unit)}` }] : []),
+            ...(line.details ? [{ label: 'Details', value: line.details }] : []),
+            ...checkedSpecs(line.checks),
+            ...(receipt.lotNo ? [{ label: 'Lot', value: receipt.lotNo }] : []),
+            ...(item.itemCode ? (specs.get(item.itemCode) ?? []) : []).filter((s) => s.label !== 'PO'),
+          ],
         };
       })
       .filter((line): line is NonNullable<typeof line> => line !== null);
@@ -242,6 +349,7 @@ export class ProcurementService {
               quantity: item.quantity,
               unit: purchaseUnit(item.unit),
               rate: item.rate,
+              specs: specsOf(item.specs),
             })),
           },
         },
@@ -350,7 +458,17 @@ export class ProcurementService {
           vehicleNo,
           notes: blank(dto.notes),
           receivedById: user.id,
-          items: { create: dto.items.map((item) => ({ purchaseOrderItemId: item.purchaseOrderItemId, quantity: item.quantity })) },
+          items: {
+            create: dto.items.map((item) => ({
+              purchaseOrderItemId: item.purchaseOrderItemId,
+              quantity: item.quantity,
+              dcQuantity: item.dcQuantity ?? null,
+              packages: blank(item.packages)?.replace(/\s+/g, '') ?? null,
+              packageCount: packageTotal(item.packages),
+              details: blank(item.details),
+              checks: checksOf(item.checks),
+            })),
+          },
         },
         include: { items: true },
       });
@@ -358,7 +476,7 @@ export class ProcurementService {
       const codes: Array<{ itemName: string; itemCode: string; isNew: boolean }> = [];
       for (const input of dto.items) {
         const item = itemById.get(input.purchaseOrderItemId)!;
-        // A line's first receipt gives it its own code (SS-2026-001…), so every purchased item is tracked apart;
+        // A line's first receipt gives it its own yarn code (01SS26…), so every purchased item is tracked apart;
         // later receipts of the same line add to that code.
         let itemCode = item.itemCode;
         if (!itemCode) {
@@ -381,7 +499,15 @@ export class ProcurementService {
             referenceType: 'PURCHASE_RECEIPT',
             referenceId: receipt.id,
             createdById: user.id,
-            notes: `${purchaseOrder.poNo} / ${receipt.receiptNo}${challanNo ? ` / challan ${challanNo}` : ''}`,
+            notes: [
+              `${purchaseOrder.poNo} / ${receipt.receiptNo}${challanNo ? ` / challan ${challanNo}` : ''}`,
+              blank(input.packages) && `${input.packages} ${packageUnitOf(categoryOf(item))}`,
+              blank(input.details),
+              differences(input.checks),
+              input.dcQuantity !== undefined && `${checkText(input.dcQuantity, input.quantity, item.unit)} against the DC's ${input.dcQuantity} ${item.unit}`,
+            ]
+              .filter(Boolean)
+              .join(' · '),
           },
           tx,
         );

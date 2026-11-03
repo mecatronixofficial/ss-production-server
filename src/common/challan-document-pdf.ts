@@ -1,4 +1,3 @@
-import PDFDocument from 'pdfkit';
 
 const INK = '#1b3c55';
 const GOLD = '#a77a24';
@@ -70,7 +69,9 @@ export const pdfWords = (value: string) =>
  * the from / to boxes, the documents it refers to, the lines (the table header repeats on every page), the total,
  * notes, who issued it and signatures. A cancelled one says so across every page.
  */
-export function renderChallanPdf(challan: ChallanDocument): Promise<Buffer> {
+export async function renderChallanPdf(challan: ChallanDocument): Promise<Buffer> {
+  // PDFKit loads on the first document instead of slowing every server start.
+  const { default: PDFDocument } = await import('pdfkit');
   const c = challan.company;
   const timezone = c.timezone || 'Asia/Kolkata';
   const company = c.name || 'SS Clothing Mills';

@@ -1006,7 +1006,7 @@ export class MoneyService implements OnModuleInit {
 
   /** Names, accounts and open bills the entry form offers. */
   async context() {
-    const [accounts, distributors, textiles, others, openSales] = await Promise.all([
+    const [accounts, distributors, textiles, others, openSales, machines, employees] = await Promise.all([
       this.prisma.moneyAccount.findMany({ where: { active: true }, orderBy: [{ type: 'asc' }, { name: 'asc' }] }),
       this.prisma.supplier.findMany({
         select: { id: true, code: true, name: true, active: true },
@@ -1038,6 +1038,9 @@ export class MoneyService implements OnModuleInit {
         orderBy: { saleDate: 'desc' },
         take: 1500,
       }),
+      // What an expense can be for: a machine (repair, spares…) or an employee (wage, salary, advance…).
+      this.prisma.machine.findMany({ where: { status: { not: 'DISABLED' } }, select: { id: true, code: true, name: true }, orderBy: { code: 'asc' } }),
+      this.prisma.employee.findMany({ where: { active: true }, select: { id: true, code: true, name: true, department: true }, orderBy: { name: 'asc' } }),
     ]);
     const taken = await this.prisma.moneyTransaction.groupBy({
       by: ['saleId'],
@@ -1063,6 +1066,8 @@ export class MoneyService implements OnModuleInit {
           open: round2(Number(s.totalAmount) - (takenBy.get(s.id) ?? 0)),
         }))
         .filter((s) => s.open > 0.005),
+      machines,
+      employees,
     };
   }
 
@@ -1133,7 +1138,11 @@ export class MoneyService implements OnModuleInit {
 
   // ───────────────────────────── Expenses ─────────────────────────────
 
-  private readonly expenseInclude = { account: { select: { id: true, name: true, type: true } } } satisfies Prisma.ExpenseInclude;
+  private readonly expenseInclude = {
+    account: { select: { id: true, name: true, type: true } },
+    machine: { select: { id: true, code: true, name: true } },
+    employee: { select: { id: true, code: true, name: true } },
+  } satisfies Prisma.ExpenseInclude;
 
   async expenses(f: ExpenseFilterDto) {
     const rows = await this.prisma.expense.findMany({
@@ -1141,6 +1150,9 @@ export class MoneyService implements OnModuleInit {
         ...(f.includeCancelled ? {} : EXPENSE_LIVE),
         ...(f.accountId ? { accountId: f.accountId } : {}),
         ...(f.category ? { category: f.category } : {}),
+        ...(f.machineId ? { machineId: f.machineId } : f.scope === 'machines' ? { machineId: { not: null } } : {}),
+        ...(f.employeeId ? { employeeId: f.employeeId } : f.scope === 'employees' ? { employeeId: { not: null } } : {}),
+        ...(f.scope === 'other' ? { machineId: null, employeeId: null } : {}),
         ...(f.from || f.to
           ? { expenseDate: { ...(f.from ? { gte: new Date(f.from) } : {}), ...(f.to ? { lte: new Date(f.to) } : {}) } }
           : {}),
@@ -1163,6 +1175,13 @@ export class MoneyService implements OnModuleInit {
     const expenseDate = dto.expenseDate ? new Date(dto.expenseDate) : new Date();
     if (expenseDate > LATEST()) throw new BadRequestException("The date can't be in the future");
     const mode = dto.paymentMode.trim().toUpperCase();
+    if (dto.machineId && !(await this.prisma.machine.findUnique({ where: { id: dto.machineId }, select: { id: true } }))) {
+      throw new NotFoundException('Machine not found');
+    }
+    if (dto.machineId && dto.employeeId) throw new BadRequestException('An expense is for a machine or an employee, not both');
+    if (dto.employeeId && !(await this.prisma.employee.findUnique({ where: { id: dto.employeeId }, select: { id: true } }))) {
+      throw new NotFoundException('Employee not found');
+    }
     if (dto.accountId) {
       const account = await this.activeAccount(this.prisma, dto.accountId, 'it was paid from');
       if ((Object.values(PaymentMode) as string[]).includes(mode)) this.checkAccountFor(mode as PaymentMode, account);
@@ -1179,6 +1198,8 @@ export class MoneyService implements OnModuleInit {
           paymentMode: mode,
           accountId: dto.accountId ?? null,
           branch: blank(dto.branch),
+          machineId: dto.machineId ?? null,
+          employeeId: dto.employeeId ?? null,
           createdById: user.id,
         },
         include: this.expenseInclude,
@@ -1196,6 +1217,8 @@ export class MoneyService implements OnModuleInit {
             amount: Number(created.amount),
             mode,
             account: created.account?.name ?? null,
+            machine: created.machine?.code ?? null,
+            employee: created.employee?.code ?? null,
           },
         },
       });
@@ -1243,7 +1266,11 @@ export class MoneyService implements OnModuleInit {
         include: { account: { select: { name: true } }, toAccount: { select: { name: true } }, sale: { select: { saleNo: true } } },
         take: 5000,
       }),
-      this.prisma.expense.findMany({ where: { ...EXPENSE_LIVE, accountId }, take: 5000 }),
+      this.prisma.expense.findMany({
+        where: { ...EXPENSE_LIVE, accountId },
+        include: { machine: { select: { code: true } }, employee: { select: { code: true, name: true } } },
+        take: 5000,
+      }),
       this.prisma.moneyTransaction.findMany({
         where: { AND: [CHEQUE_OPEN, { accountId }] },
         include: txnInclude,
@@ -1306,7 +1333,14 @@ export class MoneyService implements OnModuleInit {
         date: e.expenseDate,
         ref: e.expenseNo,
         kind: 'EXPENSE',
-        text: `${e.category}${e.description ? ` · ${e.description}` : ''}`,
+        text: [
+          e.category,
+          e.machine ? `machine ${e.machine.code}` : e.employee ? `${e.employee.name} (${e.employee.code})` : null,
+          e.subcategory && e.subcategory !== e.category ? e.subcategory : null,
+          e.description,
+        ]
+          .filter(Boolean)
+          .join(' · '),
         mode: e.paymentMode,
         moneyIn: 0,
         moneyOut: Number(e.amount),

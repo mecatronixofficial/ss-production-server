@@ -39,6 +39,12 @@ export class ProcurementController {
     return this.procurement.findOne(id, user);
   }
 
+  /** Every yarn line ordered, with what came, its checks, its yarn code and where that yarn is now. Office (admins). */
+  @Get('yarn-lines')
+  yarnLines(@CurrentUser() user: AuthUser) {
+    return this.procurement.yarnLines(user);
+  }
+
   /** Open POs being delivered to a warehouse; shown on its Warehouses page, where staff receive them (without rates). */
   @Get('incoming')
   @Roles(...GODOWN_VIEW_ROLES)

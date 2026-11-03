@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Body,
+  NotFoundException,
   Controller,
   Delete,
   Get,
@@ -28,6 +29,9 @@ import { CancelStockBillDto, ClearUnbilledDto, CreateStockBillDto, IssueAllStock
 import { InventoryService } from './inventory.service';
 import { StockBillsService } from './stock-bills.service';
 import { challanPdf } from './challan-pdf';
+import { yarnAtKnitting } from './yarn-usage';
+import { yarnStory } from './yarn-story';
+import { PrismaService } from '../prisma/prisma.service';
 
 const categoryPipe = new ParseEnumPipe(StockCategory, { optional: true });
 const optionalUuid = new ParseUUIDPipe({ optional: true });
@@ -49,7 +53,14 @@ export class InventoryController {
   constructor(
     private s: InventoryService,
     private bills: StockBillsService,
+    private prisma: PrismaService,
   ) {}
+
+  /** Yarn out at knitting, by batch: where it is (mill or machines), given, used so far and left; `warehouseId` for one warehouse's. */
+  @Get('yarn-at-knitting')
+  yarnAtKnitting(@Query('warehouseId', optionalUuid) warehouseId?: string) {
+    return yarnAtKnitting(this.prisma, warehouseId);
+  }
 
   @Get('balances')
   balances(
@@ -69,6 +80,18 @@ export class InventoryController {
     @Query('to', optionalDate) to?: Date,
   ) {
     return this.s.itemSummary(warehouseId, from, to);
+  }
+
+  /**
+   * The yarn tree behind a code (a yarn, a knitting batch, a dyeing lot or a machine run): the yarn, each knitting
+   * batch, each colour's dyeing, compacting and where it was delivered, with the weight checked at every step.
+   */
+  @Get('yarn-story')
+  async yarnTree(@Query('code') code?: string) {
+    if (!code?.trim()) throw new BadRequestException('Give a yarn code');
+    const story = await yarnStory(this.prisma, code.trim());
+    if (!story) throw new NotFoundException(`${code.trim()} has no production behind it`);
+    return story;
   }
 
   /** One item's full details. The code goes in the query: codes can hold spaces, colons and slashes. */
@@ -122,6 +145,13 @@ export class InventoryController {
   ) {
     if (!warehouseId && !ADMIN_ROLES.includes(user.role)) throw new BadRequestException('Choose a warehouse');
     return this.bills.list({ warehouseId, from, to, kind });
+  }
+
+  /** Only how many movements have no challan yet (one warehouse's, or every one's for admins): the Warehouses page's count. */
+  @Get('bills/unbilled-count')
+  billUnbilledCount(@CurrentUser() user: AuthUser, @Query('warehouseId', optionalUuid) warehouseId?: string) {
+    if (!warehouseId && !ADMIN_ROLES.includes(user.role)) throw new BadRequestException('Choose a warehouse');
+    return this.bills.unbilledCount(warehouseId);
   }
 
   @Get('bills/:id')

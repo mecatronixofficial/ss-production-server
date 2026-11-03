@@ -2,7 +2,7 @@ import { IsDateString, IsNotEmpty, IsNumber, IsOptional, IsString, IsUUID, Max, 
 
 const money = { maxDecimalPlaces: 2 };
 
-/** An expense, recorded on the Money page. */
+/** An expense, recorded on the Money page, against a machine (Machines page) or paid to an employee (their page). */
 export class ExpenseDto {
   @IsString() @IsNotEmpty() @MaxLength(60) category!: string;
   @IsOptional() @IsString() @MaxLength(60) subcategory?: string;
@@ -14,4 +14,8 @@ export class ExpenseDto {
   @IsOptional() @IsUUID(undefined, { message: 'Choose the account it was paid from' }) accountId?: string;
   @IsOptional() @IsString() @MaxLength(60) branch?: string;
   @IsOptional() @IsDateString() expenseDate?: string;
+  /** Spent on this machine (repair, spares, service…). */
+  @IsOptional() @IsUUID(undefined, { message: 'Choose the machine' }) machineId?: string;
+  /** Paid to this employee (daily wage, salary, advance, bonus…). */
+  @IsOptional() @IsUUID(undefined, { message: 'Choose the employee' }) employeeId?: string;
 }

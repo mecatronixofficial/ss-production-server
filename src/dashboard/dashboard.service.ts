@@ -29,17 +29,81 @@ export class DashboardService {
     private money: MoneyService,
   ) {}
 
-  private inFlightRequests = new Map<string, ReturnType<DashboardService['load']>>();
+  private inFlightRequests = new Map<string, Promise<unknown>>();
 
-  get(user: AuthUser, trendDays = 7) {
-    // Reuse the same work when the browser sends overlapping requests (e.g. Strict Mode), per user.
-    const key = `${user.id}:${trendDays}`;
-    let inFlight = this.inFlightRequests.get(key);
+  /** Reuses the same work when the browser sends overlapping requests (e.g. Strict Mode). */
+  private shared<T>(key: string, work: () => Promise<T>): Promise<T> {
+    let inFlight = this.inFlightRequests.get(key) as Promise<T> | undefined;
     if (!inFlight) {
-      inFlight = this.load(user, trendDays).finally(() => this.inFlightRequests.delete(key));
+      inFlight = work().finally(() => this.inFlightRequests.delete(key));
       this.inFlightRequests.set(key, inFlight);
     }
     return inFlight;
+  }
+
+  get(user: AuthUser, trendDays = 7) {
+    return this.shared(`${user.id}:${trendDays}`, () => this.load(user, trendDays));
+  }
+
+  /** Only the material-flow chart, so switching its range does not load the whole dashboard again. */
+  async trend(trendDays: number) {
+    return { success: true, data: await this.shared(`trend:${trendDays}`, () => this.trendData(trendDays)) };
+  }
+
+  /** Yarn received, fabric knitted, delivered and sold: KG per day, and the totals of the period just before. */
+  private async trendData(trendDays: number) {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const trendStart = new Date(todayStart);
+    trendStart.setDate(trendStart.getDate() - (trendDays - 1));
+    // The period just before, of the same length, so the dashboard can say whether output went up or down.
+    const previousStart = new Date(trendStart);
+    previousStart.setDate(previousStart.getDate() - trendDays);
+
+    const [yarnIn, knitDays, runsWithoutDays, deliveries, sold] = await Promise.all([
+      this.prisma.stockTransaction.findMany({
+        where: { category: 'YARN', unit: 'KG', txnType: 'PURCHASE_IN', createdAt: { gte: previousStart } },
+        select: { createdAt: true, quantityIn: true },
+      }),
+      this.prisma.knittingDayEntry.findMany({ where: { date: { gte: previousStart } }, select: { date: true, outputKg: true } }),
+      // Runs from before day entries: their fabric counts on the day they finished.
+      this.prisma.knittingRun.findMany({
+        where: { finishedAt: { gte: previousStart }, outputKg: { not: null }, days: { none: {} } },
+        select: { finishedAt: true, outputKg: true },
+      }),
+      this.prisma.fabricFlowDelivery.findMany({
+        where: { processStage: 'FINAL', destination: 'CUSTOMER', deliveredAt: { gte: previousStart } },
+        select: { deliveredAt: true, weightKg: true },
+      }),
+      // Material that left by sale, on the day it was dispatched.
+      this.prisma.saleItem.findMany({
+        where: { unit: { equals: 'KG', mode: 'insensitive' }, sale: { status: 'DISPATCHED', dispatchedAt: { gte: previousStart } } },
+        select: { dispatchedQty: true, sale: { select: { dispatchedAt: true } } },
+      }),
+    ]);
+
+    const trend = Array.from({ length: trendDays }, (_, i) => {
+      const date = new Date(trendStart);
+      date.setDate(date.getDate() + i);
+      return { date: this.dayKey(date), yarnInKg: 0, knittedKg: 0, deliveredKg: 0, soldKg: 0 };
+    });
+    const byDay = new Map(trend.map((d) => [d.date, d]));
+    const previousKey = this.dayKey(previousStart);
+    const trendKey = this.dayKey(trendStart);
+    const trendPrevious = { yarnInKg: 0, knittedKg: 0, deliveredKg: 0, soldKg: 0 };
+    /** A day in the range goes on its own point; a day in the period before adds to that period's total. */
+    const add = (key: string, field: keyof typeof trendPrevious, value: number) => {
+      const d = byDay.get(key);
+      if (d) d[field] += value;
+      else if (key >= previousKey && key < trendKey) trendPrevious[field] += value;
+    };
+    for (const row of yarnIn) add(this.dayKey(row.createdAt), 'yarnInKg', Number(row.quantityIn));
+    // Fabric by the production day it was knitted (a date-only column, so read it as stored).
+    for (const day of knitDays) add(day.date.toISOString().slice(0, 10), 'knittedKg', Number(day.outputKg));
+    for (const run of runsWithoutDays) if (run.finishedAt) add(this.dayKey(run.finishedAt), 'knittedKg', Number(run.outputKg));
+    for (const row of deliveries) add(this.dayKey(row.deliveredAt), 'deliveredKg', Number(row.weightKg));
+    for (const row of sold) if (row.sale.dispatchedAt) add(this.dayKey(row.sale.dispatchedAt), 'soldKg', Number(row.dispatchedQty ?? 0));
+    return { days: trendDays, trend, trendPrevious };
   }
 
   private async load(user: AuthUser, trendDays: number) {
@@ -48,14 +112,21 @@ export class DashboardService {
     const todayStart = new Date(now);
     todayStart.setHours(0, 0, 0, 0);
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const trendStart = new Date(todayStart);
-    trendStart.setDate(trendStart.getDate() - (trendDays - 1));
 
-    // Batches of reads, each below the connection pool size.
-    const [flows, deliveredThisMonth, runs, machines] = await Promise.all([
+    const KG = { equals: 'KG', mode: 'insensitive' as const };
+    // Every read goes out at once: the connection pool runs as many side by side as it has connections and queues the
+    // rest, so one slow round trip to the database does not wait on the one before it.
+    const [
+      flows, deliveredThisMonth, running, lastDay, machines,
+      stock, purchaseOrders, awaitingFabric,
+      notifications, unreadNotifications, lastDelivery, processUpdates,
+      salesWaiting, salesSentBack, salesMonth, soldKgMonth,
+      money, recent, trend,
+    ] = await Promise.all([
       this.prisma.fabricProductionFlow.findMany({
         where: { status: { not: 'DELIVERED' } },
-        include: { knittingRuns: { select: { yarnKg: true, status: true } } },
+        // A knitting batch's dyeing lots: it counts only the grey fabric (and cost) not yet in a lot.
+        include: { knittingRuns: { select: { yarnKg: true, status: true } }, lots: { select: { purchasedWeightKg: true } } },
         orderBy: { purchaseDate: 'asc' },
       }),
       // Delivered = finished fabric that went to a party, as in the Monthly report and Finance; fabric moved into an
@@ -66,22 +137,25 @@ export class DashboardService {
         _count: true,
       }),
       this.prisma.knittingRun.findMany({
-        where: { OR: [{ status: 'RUNNING' }, { finishedAt: { gte: trendStart } }] },
-        select: { id: true, runNo: true, status: true, startedAt: true, startShift: true, finishedAt: true, yarnKg: true, outputKg: true, machine: { select: { id: true, code: true } } },
+        where: { status: 'RUNNING' },
+        select: { id: true, runNo: true, startedAt: true, startShift: true, outputKg: true, machine: { select: { id: true, code: true } } },
       }),
+      // The last production day recorded at day end (KG and rolls of every machine that day), however long ago.
+      this.prisma.$queryRaw<Array<{ date: string; machines: number; kg: number; rolls: number }>>`
+        SELECT to_char("date", 'YYYY-MM-DD') AS "date", COUNT(*)::int AS "machines",
+          COALESCE(SUM("outputKg"), 0)::float8 AS "kg", COALESCE(SUM("rollCount"), 0)::int AS "rolls"
+        FROM "KnittingDayEntry"
+        WHERE "date" = (SELECT MAX("date") FROM "KnittingDayEntry")
+        GROUP BY "date"`.then(([row]) => row ?? null),
       this.prisma.machine.groupBy({ by: ['status'], where: { status: { not: MachineStatus.DISABLED } }, _count: true }),
-    ]);
-
-    const [stock, yarnIn, deliveries, purchaseOrders, awaitingFabric] = await Promise.all([
-      this.prisma.stockTransaction.groupBy({ by: ['category', 'unit'], _sum: { quantityIn: true, quantityOut: true } }),
-      this.prisma.stockTransaction.findMany({
-        where: { category: 'YARN', unit: 'KG', txnType: 'PURCHASE_IN', createdAt: { gte: trendStart } },
-        select: { createdAt: true, quantityIn: true },
-      }),
-      this.prisma.fabricFlowDelivery.findMany({
-        where: { processStage: 'FINAL', destination: 'CUSTOMER', deliveredAt: { gte: trendStart } },
-        select: { deliveredAt: true, weightKg: true },
-      }),
+      // Stock by category and unit, and the positions below zero, in one pass over the stock entries. Only the
+      // negative positions come back (counted here), not every position.
+      this.prisma.$queryRaw<Array<{ category: string | null; unit: string; qty: number; position: number }>>`
+        SELECT "category"::text AS "category", "unit", (SUM("quantityIn") - SUM("quantityOut"))::float8 AS "qty",
+          GROUPING("category")::int AS "position"
+        FROM "StockTransaction"
+        GROUP BY GROUPING SETS (("category", "unit"), ("itemCode", "lotNo", "warehouseId", "unit"))
+        HAVING GROUPING("category") = 0 OR SUM("quantityIn") - SUM("quantityOut") < ${-EMPTY}`,
       this.prisma.purchaseOrder.findMany({
         where: { status: { in: OPEN_PO } },
         select: { id: true, poNo: true, expectedDate: true, supplier: { select: { name: true } }, items: { select: { quantity: true, rate: true, receiptItems: { select: { quantity: true } } } } },
@@ -92,9 +166,6 @@ export class DashboardService {
         select: { id: true, weightKg: true, deliveredAt: true, flow: { select: { flowNo: true } }, warehouse: { select: { id: true, code: true } } },
         orderBy: { deliveredAt: 'asc' },
       }),
-    ]);
-
-    const [notifications, unreadNotifications, negativePositions, lastDelivery, processUpdates] = await Promise.all([
       this.prisma.notification.findMany({
         where: { isRead: false, userId: user.id },
         take: 5,
@@ -102,10 +173,6 @@ export class DashboardService {
         select: { id: true, title: true, message: true, type: true, priority: true, createdAt: true },
       }),
       this.prisma.notification.count({ where: { isRead: false, userId: user.id } }),
-      this.prisma.stockTransaction.groupBy({
-        by: ['itemCode', 'lotNo', 'warehouseId', 'unit'],
-        _sum: { quantityIn: true, quantityOut: true },
-      }),
       this.prisma.fabricFlowDelivery.aggregate({ where: { processStage: 'FINAL', destination: 'CUSTOMER' }, _max: { deliveredAt: true } }),
       // Production updates: the latest processes completed (knitting, dyeing, compacting, machine runs), read or not.
       this.prisma.notification.findMany({
@@ -114,36 +181,26 @@ export class DashboardService {
         take: 8,
         select: { id: true, title: true, message: true, priority: true, isRead: true, createdAt: true, referenceType: true, referenceId: true },
       }),
-    ]);
-    const KG = { equals: 'KG', mode: 'insensitive' as const };
-    const [salesWaiting, salesSentBack, salesMonth, soldKgMonth, soldTrend] = await Promise.all([
       this.prisma.sale.count({ where: { status: 'PENDING' } }),
       isAdmin ? this.prisma.sale.count({ where: { status: 'REJECTED' } }) : 0,
       // Sales billed this month: dispatched bills by bill date, as on Finance.
       this.prisma.sale.aggregate({ where: { status: 'DISPATCHED', saleDate: { gte: monthStart } }, _sum: { totalAmount: true }, _count: true }),
       this.prisma.saleItem.aggregate({ where: { unit: KG, sale: { status: 'DISPATCHED', saleDate: { gte: monthStart } } }, _sum: { dispatchedQty: true } }),
-      // Material that left by sale, on the day it was dispatched.
-      this.prisma.saleItem.findMany({
-        where: { unit: KG, sale: { status: 'DISPATCHED', dispatchedAt: { gte: trendStart } } },
-        select: { dispatchedQty: true, sale: { select: { dispatchedAt: true } } },
-      }),
+      isAdmin ? this.money.summary() : null,
+      // The latest bills and what was paid on them; the payments follow the bills without waiting for anything else.
+      isAdmin
+        ? this.prisma.sale
+            .findMany({
+              where: { status: { not: 'CANCELLED' } },
+              orderBy: { createdAt: 'desc' },
+              take: 6,
+              select: { id: true, saleNo: true, saleDate: true, partyName: true, status: true, totalAmount: true },
+            })
+            .then(async (sales) => ({ sales, paid: await saleMoney(this.prisma, sales.map((sale) => sale.id)) }))
+        : { sales: [], paid: new Map<string, { received: number; pending: number }>() },
+      this.trendData(trendDays),
     ]);
-    // The Money page's overview runs a dozen reads of its own, so it goes on its own.
-    const [money, recentSales] = isAdmin
-      ? await Promise.all([
-          this.money.summary(),
-          this.prisma.sale.findMany({
-            where: { status: { not: 'CANCELLED' } },
-            orderBy: { createdAt: 'desc' },
-            take: 6,
-            select: { id: true, saleNo: true, saleDate: true, partyName: true, status: true, totalAmount: true },
-          }),
-        ])
-      : [null, []];
-    const recentMoney = await saleMoney(
-      this.prisma,
-      recentSales.map((sale) => sale.id),
-    );
+    const negativeCount = stock.filter((row) => row.position === 1).length;
 
     // ---- Production batches
     const views = flows.map((flow) => ({ flow, view: fabricFlowView(flow) }));
@@ -177,38 +234,47 @@ export class DashboardService {
                 : flow.status === 'AT_OFFICE' ? 'Ready to deliver' : 'Not started',
       }))
       .sort((a, b) => b.daysInStage - a.daysInStage);
+    // Each stage over every open batch (the table below only lists the longest waiting few): weight, oldest, and where.
+    const board = STAGES.map((stage) => {
+      const rows = activeBatches.filter((b) => b.status === stage);
+      const places = new Map<string, { name: string; count: number; kg: number; oldest: number }>();
+      for (const b of rows) {
+        const place = places.get(b.place) ?? { name: b.place, count: 0, kg: 0, oldest: 0 };
+        place.count += 1;
+        place.kg += b.currentKg;
+        place.oldest = Math.max(place.oldest, b.daysInStage);
+        places.set(b.place, place);
+      }
+      return {
+        key: stage,
+        count: rows.length,
+        kg: rows.reduce((sum, b) => sum + b.currentKg, 0),
+        oldestDays: rows.reduce((max, b) => Math.max(max, b.daysInStage), 0),
+        stuck: rows.filter((b) => b.daysInStage > STUCK_DAYS).length,
+        places: [...places.values()].sort((a, b) => b.oldest - a.oldest || b.kg - a.kg),
+      };
+    });
+    // Weight lost in process (knitting, dyeing, compacting) on batches past knitting, weighted by the yarn they started with.
+    const processed = activeBatches.filter((b) => b.status !== 'PURCHASED' && b.lossPct > 0);
+    const processedKg = processed.reduce((sum, b) => sum + b.startedKg, 0);
+    const processLossPct = processedKg ? processed.reduce((sum, b) => sum + (b.lossPct / 100) * b.startedKg, 0) / processedKg * 100 : null;
     const readyKg = views.filter(({ flow }) => flow.status === 'AT_OFFICE').reduce((sum, { view }) => sum + view.metrics.balanceFabricKg, 0);
     const knittingTasks = flows.filter((f) => {
       if (f.status !== 'KNITTING' || f.knittingMillType !== 'OWN' || f.knittingFinishedAt) return false;
-      const allocated = f.knittingRuns.reduce((sum, run) => sum + Number(run.yarnKg), 0);
-      return allocated < Number(f.purchasedWeightKg) - EMPTY;
+      // Waiting = no machine knitting it now (machines are not loaded up to a capacity, so a task on one is not waiting).
+      return !f.knittingRuns.some((run) => run.status === 'RUNNING');
     }).length;
 
     // ---- Machines and runs
     const machineCounts = Object.fromEntries(machines.map((m) => [m.status, m._count])) as Record<string, number>;
     const machineTotal = machines.reduce((sum, m) => sum + m._count, 0);
-    const running = runs.filter((r) => r.status === 'RUNNING');
-    const finishedToday = runs.filter((r) => r.finishedAt && r.finishedAt >= todayStart);
-
-    // ---- Trend: yarn received, fabric knitted, fabric delivered (KG per day)
-    const trend = Array.from({ length: trendDays }, (_, i) => {
-      const date = new Date(trendStart);
-      date.setDate(date.getDate() + i);
-      return { date: this.dayKey(date), yarnInKg: 0, knittedKg: 0, deliveredKg: 0, soldKg: 0 };
-    });
-    const byDay = new Map(trend.map((d) => [d.date, d]));
-    for (const row of yarnIn) { const d = byDay.get(this.dayKey(row.createdAt)); if (d) d.yarnInKg += Number(row.quantityIn); }
-    for (const run of runs) { if (run.finishedAt && run.outputKg !== null) { const d = byDay.get(this.dayKey(run.finishedAt)); if (d) d.knittedKg += Number(run.outputKg); } }
-    for (const row of deliveries) { const d = byDay.get(this.dayKey(row.deliveredAt)); if (d) d.deliveredKg += Number(row.weightKg); }
-    for (const row of soldTrend) { if (row.sale.dispatchedAt) { const d = byDay.get(this.dayKey(row.sale.dispatchedAt)); if (d) d.soldKg += Number(row.dispatchedQty ?? 0); } }
 
     // ---- Stock in KG (other units are shown on the Warehouses page)
     const stockKg = Object.fromEntries(FABRIC.map((c) => [c, 0])) as Record<(typeof FABRIC)[number], number>;
     for (const row of stock) {
-      if (row.unit !== 'KG' || !(row.category in stockKg)) continue;
-      stockKg[row.category as (typeof FABRIC)[number]] += Number(row._sum.quantityIn ?? 0) - Number(row._sum.quantityOut ?? 0);
+      if (row.position === 1 || row.unit !== 'KG' || !row.category || !(row.category in stockKg)) continue;
+      stockKg[row.category as (typeof FABRIC)[number]] += row.qty;
     }
-    const negativeCount = negativePositions.filter((p) => Number(p._sum.quantityIn ?? 0) - Number(p._sum.quantityOut ?? 0) < -EMPTY).length;
 
     // ---- Purchases
     const overduePOs = purchaseOrders.filter((po) => po.expectedDate && po.expectedDate < todayStart);
@@ -218,22 +284,24 @@ export class DashboardService {
     );
 
     // ---- What needs someone's attention, most urgent first
-    const attention: Array<{ tone: 'danger' | 'warning' | 'info'; text: string; href: string }> = [];
+    /** What each item is about, so the dashboard shows its icon (an overdue PO links to Warehouses for non-admins). */
+    type AttentionKind = 'machines' | 'warehouse' | 'purchases' | 'sales' | 'money' | 'production';
+    const attention: Array<{ tone: 'danger' | 'warning' | 'info'; kind: AttentionKind; text: string; href: string }> = [];
     const push = (when: boolean, item: (typeof attention)[number]) => { if (when) attention.push(item); };
     const down = (machineCounts.MAINTENANCE ?? 0) + (machineCounts.BREAKDOWN ?? 0);
-    push(down > 0, { tone: 'danger', text: `${down} machine${down === 1 ? '' : 's'} out of service`, href: '/masters/machines' });
-    push(overduePOs.length > 0, { tone: 'danger', text: `${overduePOs.length} purchase order${overduePOs.length === 1 ? '' : 's'} past the expected date${overduePOs[0] ? ` (${overduePOs[0].poNo} · ${overduePOs[0].supplier.name})` : ''}`, href: isAdmin ? '/purchases' : '/warehouses' });
-    push(negativeCount > 0, { tone: 'danger', text: `${negativeCount} stock position${negativeCount === 1 ? ' is' : 's are'} below zero; check the entries`, href: '/warehouses' });
-    push(salesSentBack > 0, { tone: 'danger', text: `${salesSentBack} sale${salesSentBack === 1 ? ' was' : 's were'} sent back by the warehouse`, href: '/sales' });
+    push(down > 0, { tone: 'danger', kind: 'machines', text: `${down} machine${down === 1 ? '' : 's'} out of service`, href: '/masters/machines' });
+    push(overduePOs.length > 0, { tone: 'danger', kind: 'purchases', text: `${overduePOs.length} purchase order${overduePOs.length === 1 ? '' : 's'} past the expected date${overduePOs[0] ? ` (${overduePOs[0].poNo} · ${overduePOs[0].supplier.name})` : ''}`, href: isAdmin ? '/purchases' : '/warehouses' });
+    push(negativeCount > 0, { tone: 'danger', kind: 'warehouse', text: `${negativeCount} stock position${negativeCount === 1 ? ' is' : 's are'} below zero; check the entries`, href: '/warehouses' });
+    push(salesSentBack > 0, { tone: 'danger', kind: 'sales', text: `${salesSentBack} sale${salesSentBack === 1 ? ' was' : 's were'} sent back by the warehouse`, href: '/sales' });
     const cheques = money?.cheques;
-    push(!!cheques && cheques.bouncedMonth.count > 0, { tone: 'danger', text: `${cheques?.bouncedMonth.count} cheque${cheques?.bouncedMonth.count === 1 ? '' : 's'} bounced this month`, href: '/money?tab=cheques' });
-    push(salesWaiting > 0, { tone: 'warning', text: `${salesWaiting} sale${salesWaiting === 1 ? '' : 's'} waiting to be verified and dispatched`, href: isAdmin ? '/sales' : '/warehouses' });
-    push(knittingTasks > 0, { tone: 'warning', text: `${knittingTasks} knitting task${knittingTasks === 1 ? '' : 's'} waiting for a machine`, href: '/masters/machines' });
-    push(awaitingFabric.length > 0, { tone: 'warning', text: `${awaitingFabric.length} fabric deliver${awaitingFabric.length === 1 ? 'y' : 'ies'} waiting to be received in a warehouse`, href: awaitingFabric[0] ? `/warehouses?warehouse=${awaitingFabric[0].warehouse?.id}` : '/warehouses' });
+    push(!!cheques && cheques.bouncedMonth.count > 0, { tone: 'danger', kind: 'money', text: `${cheques?.bouncedMonth.count} cheque${cheques?.bouncedMonth.count === 1 ? '' : 's'} bounced this month`, href: '/money?tab=cheques' });
+    push(salesWaiting > 0, { tone: 'warning', kind: 'sales', text: `${salesWaiting} sale${salesWaiting === 1 ? '' : 's'} waiting to be verified and dispatched`, href: isAdmin ? '/sales' : '/warehouses' });
+    push(knittingTasks > 0, { tone: 'warning', kind: 'machines', text: `${knittingTasks} knitting task${knittingTasks === 1 ? '' : 's'} waiting for a machine`, href: '/masters/machines' });
+    push(awaitingFabric.length > 0, { tone: 'warning', kind: 'warehouse', text: `${awaitingFabric.length} fabric deliver${awaitingFabric.length === 1 ? 'y' : 'ies'} waiting to be received in a warehouse`, href: awaitingFabric[0] ? `/warehouses?warehouse=${awaitingFabric[0].warehouse?.id}` : '/warehouses' });
     const stuck = activeBatches.filter((b) => b.status !== 'PURCHASED' && b.daysInStage > STUCK_DAYS);
-    push(stuck.length > 0, { tone: 'warning', text: `${stuck.length} batch${stuck.length === 1 ? '' : 'es'} in the same stage for over ${STUCK_DAYS} days (${stuck[0]?.flowNo})`, href: `/production?batch=${encodeURIComponent(stuck[0]?.flowNo ?? '')}` });
-    push(!!cheques && cheques.toDeposit.count > 0, { tone: 'warning', text: `${cheques?.toDeposit.count} received cheque${cheques?.toDeposit.count === 1 ? '' : 's'} waiting to be deposited`, href: '/money?tab=cheques' });
-    push(stageCounts.AT_OFFICE > 0, { tone: 'info', text: `${stageCounts.AT_OFFICE} batch${stageCounts.AT_OFFICE === 1 ? '' : 'es'} ready to deliver (${readyKg.toFixed(0)} KG)`, href: '/production' });
+    push(stuck.length > 0, { tone: 'warning', kind: 'production', text: `${stuck.length} batch${stuck.length === 1 ? '' : 'es'} in the same stage for over ${STUCK_DAYS} days (${stuck[0]?.flowNo})`, href: `/production?batch=${encodeURIComponent(stuck[0]?.flowNo ?? '')}` });
+    push(!!cheques && cheques.toDeposit.count > 0, { tone: 'warning', kind: 'money', text: `${cheques?.toDeposit.count} received cheque${cheques?.toDeposit.count === 1 ? '' : 's'} waiting to be deposited`, href: '/money?tab=cheques' });
+    push(stageCounts.AT_OFFICE > 0, { tone: 'info', kind: 'production', text: `${stageCounts.AT_OFFICE} batch${stageCounts.AT_OFFICE === 1 ? '' : 'es'} ready to deliver (${readyKg.toFixed(0)} KG)`, href: '/production' });
 
     return {
       success: true,
@@ -242,7 +310,10 @@ export class DashboardService {
         isAdmin,
         production: {
           stages: STAGES.map((stage) => ({ key: stage, count: stageCounts[stage] })),
+          board,
           active: flows.length,
+          inProcessKg: activeBatches.reduce((sum, b) => sum + b.currentKg, 0),
+          processLossPct,
           readyKg,
           deliveredThisMonth: { count: deliveredThisMonth._count, kg: Number(deliveredThisMonth._sum.weightKg ?? 0), amount: isAdmin ? Number(deliveredThisMonth._sum.amount ?? 0) : null },
           batches: activeBatches.slice(0, 8),
@@ -252,14 +323,15 @@ export class DashboardService {
           total: machineTotal,
           byStatus: machineCounts,
           knitting: running.length,
-          yarnOnMachinesKg: running.reduce((sum, r) => sum + Number(r.yarnKg), 0),
-          finishedToday: { count: finishedToday.length, kg: finishedToday.reduce((sum, r) => sum + Number(r.outputKg ?? 0), 0) },
+          knittedOnRunningKg: running.reduce((sum, r) => sum + Number(r.outputKg ?? 0), 0),
+          lastDay,
           knittingTasks,
           running: running
-            .map((r) => ({ id: r.id, runNo: r.runNo, machineId: r.machine.id, machine: r.machine.code, startedAt: r.startedAt.toISOString(), startShift: r.startShift, yarnKg: Number(r.yarnKg) }))
+            .map((r) => ({ id: r.id, runNo: r.runNo, machineId: r.machine.id, machine: r.machine.code, startedAt: r.startedAt.toISOString(), startShift: r.startShift, knittedKg: Number(r.outputKg ?? 0) }))
             .sort((a, b) => a.machine.localeCompare(b.machine)),
         },
-        trend,
+        trend: trend.trend,
+        trendPrevious: trend.trendPrevious,
         stockKg,
         purchases: {
           open: purchaseOrders.length,
@@ -267,19 +339,30 @@ export class DashboardService {
           toArriveValue: isAdmin ? toArriveValue : null,
           next: purchaseOrders.slice(0, 4).map((po) => ({ id: po.id, poNo: po.poNo, supplier: po.supplier.name, expectedDate: po.expectedDate?.toISOString() ?? null })),
         },
-        awaitingFabric: { count: awaitingFabric.length, kg: awaitingFabric.reduce((sum, d) => sum + Number(d.weightKg), 0) },
+        awaitingFabric: {
+          count: awaitingFabric.length,
+          kg: awaitingFabric.reduce((sum, d) => sum + Number(d.weightKg), 0),
+          next: awaitingFabric.slice(0, 4).map((d) => ({
+            id: d.id,
+            flowNo: d.flow.flowNo,
+            warehouseId: d.warehouse?.id ?? null,
+            warehouse: d.warehouse?.code ?? 'Warehouse',
+            kg: Number(d.weightKg),
+            deliveredAt: d.deliveredAt.toISOString(),
+          })),
+        },
         sales: {
           waiting: salesWaiting,
           sentBack: salesSentBack,
           thisMonth: { count: salesMonth._count, kg: Number(soldKgMonth._sum.dispatchedQty ?? 0), amount: isAdmin ? Number(salesMonth._sum.totalAmount ?? 0) : null },
-          recent: recentSales.map((sale) => ({
+          recent: recent.sales.map((sale) => ({
             id: sale.id,
             saleNo: sale.saleNo,
             saleDate: sale.saleDate.toISOString(),
             party: sale.partyName,
             status: sale.status,
             total: Number(sale.totalAmount),
-            payment: salePayment(Number(sale.totalAmount), recentMoney.get(sale.id)).status,
+            payment: salePayment(Number(sale.totalAmount), recent.paid.get(sale.id)).status,
           })),
         },
         money: money && {

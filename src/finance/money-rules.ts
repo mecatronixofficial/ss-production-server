@@ -56,18 +56,20 @@ export async function paidToDistributors(db: Db, where: Prisma.MoneyTransactionW
 /**
  * Money received against each sale bill: `received` counts (cleared), `pending` is in cheques still to clear.
  * `due` is what is left of the bill; a bill not yet dispatched is shown against what was entered.
+ * `null` reads it for every sale at once.
  */
-export async function saleMoney(db: Db, saleIds: string[]) {
-  if (!saleIds.length) return new Map<string, { received: number; pending: number }>();
+export async function saleMoney(db: Db, saleIds: string[] | null) {
+  if (saleIds && !saleIds.length) return new Map<string, { received: number; pending: number }>();
+  const sales = saleIds ? { in: saleIds } : { not: null };
   const [counted, open] = await Promise.all([
     db.moneyTransaction.groupBy({
       by: ['saleId'],
-      where: { AND: [COUNTED, { kind: MoneyTxnKind.RECEIPT, saleId: { in: saleIds } }] },
+      where: { AND: [COUNTED, { kind: MoneyTxnKind.RECEIPT, saleId: sales }] },
       _sum: { amount: true },
     }),
     db.moneyTransaction.groupBy({
       by: ['saleId'],
-      where: { AND: [CHEQUE_OPEN, { kind: MoneyTxnKind.RECEIPT, saleId: { in: saleIds } }] },
+      where: { AND: [CHEQUE_OPEN, { kind: MoneyTxnKind.RECEIPT, saleId: sales }] },
       _sum: { amount: true },
     }),
   ]);
@@ -107,11 +109,11 @@ export type ModeTotal = { mode: PaymentMode; amount: number; count: number };
  * Monthly report, so they always agree.
  * - In: money received (sales, advances, other) + amounts collected on production deliveries (recorded on the
  *   Production page, not in any account).
- * - Out: every payment (distributors, others) + expenses.
+ * - Out: every payment (distributors, others) + expenses (machine expenses and money given to staff among them).
  */
 export async function cashFlow(db: Db, from: Date, to: Date) {
   const range = { gte: from, lte: to };
-  const [byMode, distributorPaid, expenses, deliveries] = await Promise.all([
+  const [byMode, distributorPaid, expenses, machineSpend, staffPaid, deliveries] = await Promise.all([
     db.moneyTransaction.groupBy({
       by: ['kind', 'mode'],
       where: { AND: [movedIn(range), { kind: { in: [MoneyTxnKind.RECEIPT, MoneyTxnKind.PAYMENT] } }] },
@@ -123,6 +125,8 @@ export async function cashFlow(db: Db, from: Date, to: Date) {
       _sum: { amount: true },
     }),
     db.expense.aggregate({ where: { ...EXPENSE_LIVE, expenseDate: range }, _sum: { amount: true }, _count: { _all: true } }),
+    db.expense.aggregate({ where: { ...EXPENSE_LIVE, expenseDate: range, machineId: { not: null } }, _sum: { amount: true } }),
+    db.expense.aggregate({ where: { ...EXPENSE_LIVE, expenseDate: range, employeeId: { not: null } }, _sum: { amount: true } }),
     db.fabricFlowDelivery.aggregate({
       where: { destination: 'CUSTOMER', processStage: 'FINAL', deliveredAt: range },
       _sum: { amount: true },
@@ -157,6 +161,9 @@ export async function cashFlow(db: Db, from: Date, to: Date) {
     otherPaid: round2(paidTotal - supplierPaid),
     expenses: expenseTotal,
     expenseCount: expenses._count._all,
+    /** Of the expenses: spent on machines, and given to employees. */
+    machineExpenses: round2(Number(machineSpend._sum.amount ?? 0)),
+    staffPayments: round2(Number(staffPaid._sum.amount ?? 0)),
     moneyIn,
     moneyOut,
     net: round2(moneyIn - moneyOut),

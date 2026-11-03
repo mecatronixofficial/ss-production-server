@@ -18,7 +18,7 @@ const flow = {
   knittingBagCount: 12,
 };
 
-/** Just the three lookups itemSpecs makes. */
+/** Just the lookups itemSpecs makes. */
 const fakeDb = {
   fabricProductionFlow: { findMany: () => Promise.resolve([flow]) },
   knittingRun: {
@@ -44,6 +44,10 @@ const fakeDb = {
           itemCode: 'SS-2026-020',
           itemName: '30s combed',
           category: 'YARN',
+          specs: [
+            { label: 'Count', value: "36'S" },
+            { label: 'Quality', value: 'VL' },
+          ],
           purchaseOrder: { poNo: 'PUR-2026-000012', orderDate: new Date(), supplier: { name: 'Kumar Yarns' } },
         },
         // An older order of the same code: the newest one is used.
@@ -55,13 +59,17 @@ const fakeDb = {
         },
       ]),
   },
+  yarnReceiptLine: {
+    findMany: () =>
+      Promise.resolve([{ itemCode: '01SS26', count: "36'S VL", bags: '30+9', bagCount: 39, receipt: { dcNo: '574', millName: 'CHERAN MILL', agentName: null } }]),
+  },
 } as unknown as PrismaClient;
 
 describe('itemSpecs', () => {
   it('gives a batch its full fabric construction', async () => {
     const specs = await itemSpecs(fakeDb, ['SS-2026-003-D1']);
     expect(specsText(specs.get('SS-2026-003-D1'))).toBe(
-      'Fabric Single jersey  ·  Dia 22 DIA  ·  GSM 180  ·  GG 28G  ·  LL 2.8mm  ·  Colour Navy  ·  Count 30s combed cotton  ·  Yarn SS-2026-003  ·  Rolls 24  ·  Bags 12  ·  Batch SS-2026-003-D1',
+      'Fabric Single jersey  ·  Dia 22 DIA  ·  GSM 180  ·  GG 28G  ·  LL 2.8mm  ·  Colour Navy  ·  Count 30s combed cotton  ·  Yarn SS-2026-003  ·  Rolls 24  ·  Batch SS-2026-003-D1',
     );
   });
 
@@ -80,13 +88,20 @@ describe('itemSpecs', () => {
     expect(byLabel.Yarns).toBe('SS-2026-010 40s cotton');
   });
 
-  it('gives purchased material its distributor and latest PO, without prices', async () => {
+  it('gives purchased material its details as ordered, distributor and latest PO, without prices', async () => {
     const specs = (await itemSpecs(fakeDb, ['SS-2026-020'])).get('SS-2026-020')!;
     expect(specs).toEqual([
       { label: 'Material', value: 'yarn' },
+      { label: 'Count', value: "36'S" },
+      { label: 'Quality', value: 'VL' },
       { label: 'Distributor', value: 'Kumar Yarns' },
       { label: 'PO', value: 'PUR-2026-000012' },
     ]);
+  });
+
+  it('gives yarn from the received register its count, bags, mill and DC', async () => {
+    const specs = await itemSpecs(fakeDb, ['01SS26']);
+    expect(specsText(specs.get('01SS26'))).toBe("Count 36'S VL  ·  Bags 30+9 = 39  ·  Mill CHERAN MILL  ·  Agent Direct  ·  Mill DC 574");
   });
 
   it('asks for nothing when there are no codes', async () => {

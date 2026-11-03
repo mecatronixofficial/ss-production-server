@@ -147,6 +147,10 @@ export class MoneyTxnFilterDto {
 
 export class ExpenseFilterDto {
   @IsOptional() @IsUUID() accountId?: string;
+  @IsOptional() @IsUUID() machineId?: string;
+  @IsOptional() @IsUUID() employeeId?: string;
+  /** Only expenses spent on machines, only money given to employees, or only the rest. */
+  @IsOptional() @IsIn(['machines', 'employees', 'other']) scope?: 'machines' | 'employees' | 'other';
   @IsOptional() @Transform(trim) @IsString() @MaxLength(60) category?: string;
   /** Inclusive, ISO date-times. */
   @IsOptional() @IsDateString() from?: string;
@@ -158,6 +162,13 @@ export class ExpenseFilterDto {
 export class PeriodDto {
   @IsDateString() from!: string;
   @IsDateString() to!: string;
+}
+
+/** Profit and loss for a period, by day, week (Monday to Sunday), month or financial year (April to March). */
+export class PnlQueryDto extends PeriodDto {
+  @IsIn(['day', 'week', 'month', 'year']) group!: 'day' | 'week' | 'month' | 'year';
+  /** The browser's `getTimezoneOffset()` in minutes (India is -330), so a day runs midnight to midnight there. */
+  @IsOptional() @Transform(({ value }) => (value === undefined || value === '' ? undefined : Number(value))) @IsNumber() @Min(-840) @Max(840) tz?: number;
 }
 
 /** One party's statement: a distributor or textile by id, or an other party by name. */

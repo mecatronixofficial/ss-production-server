@@ -50,9 +50,12 @@ export async function itemJourney(prisma: PrismaService, code: string, opts: { p
   const flowIdsFromRuns = [...new Set(directRuns.map((r) => r.productionFlowId).filter((id): id is string => !!id))];
 
   const flows = await prisma.fabricProductionFlow.findMany({
-    where: { OR: [{ flowNo: code }, { yarnItemCode: code }, ...(flowIdsFromRuns.length ? [{ id: { in: flowIdsFromRuns } }] : [])] },
+    // A knitting batch's code brings its dyeing lots; a lot's brings its knitting batch.
+    where: { OR: [{ flowNo: code }, { yarnItemCode: code }, { parent: { flowNo: code } }, { lots: { some: { flowNo: code } } }, ...(flowIdsFromRuns.length ? [{ id: { in: flowIdsFromRuns } }] : [])] },
     include: {
       expenses: { select: { amount: true } },
+      lots: { select: { flowNo: true, purchasedWeightKg: true } },
+      parent: { select: { flowNo: true } },
       deliveries: { include: { warehouse: { select: { code: true, name: true } } }, orderBy: { deliveredAt: 'asc' } },
       knittingRuns: { select: runSelect, orderBy: { startedAt: 'asc' } },
       yarnWarehouse: { select: { code: true } },
@@ -106,8 +109,11 @@ export async function itemJourney(prisma: PrismaService, code: string, opts: { p
     return {
       flowNo: f.flowNo,
       status: f.status,
-      /** This code's place in the batch: the yarn it was made from, or the batch's own fabric. */
-      role: f.flowNo === code ? 'FABRIC' : f.yarnItemCode === code ? 'YARN' : 'KNITTED',
+      /** This code's place in the batch: the yarn it was made from, the batch's own fabric, its lot or its knitting batch. */
+      role:
+        f.flowNo === code ? 'FABRIC' : f.parent?.flowNo === code ? 'LOT' : f.lots.some((lot) => lot.flowNo === code) ? 'KNITTING_BATCH' : f.yarnItemCode === code ? 'YARN' : 'KNITTED',
+      /** A dyeing lot's knitting batch. */
+      parentFlowNo: f.parent?.flowNo ?? null,
       fabric: {
         type: f.fabricType,
         diameter: f.fabricDiameter,
@@ -134,7 +140,7 @@ export async function itemJourney(prisma: PrismaService, code: string, opts: { p
         startedAt: f.knittingDate,
         expectedFinish: f.knittingExpectedFinishDate,
         finishedAt: f.knittingFinishedAt,
-        bags: f.knittingBagCount,
+        rolls: f.knittingBagCount,
         outputKg: v.knittingDeliveryKg,
         destination: f.knittingDestination,
         deliveryPlace: f.knittingDeliveryPlace,

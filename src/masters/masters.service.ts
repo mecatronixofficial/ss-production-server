@@ -498,11 +498,27 @@ export class MastersService {
   }
 
   /** Active and inactive, with the login each one is linked to. Employees are never deleted. */
-  employees() {
-    return this.prisma.employee.findMany({
-      orderBy: [{ active: 'desc' }, { name: 'asc' }],
-      include: { user: { select: { id: true, name: true, email: true, status: true } } },
-    });
+  /** Every employee with their login, the machines they are on now, how many runs they operated and the money given this month. */
+  async employees() {
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const [employees, paid] = await Promise.all([
+      this.prisma.employee.findMany({
+        orderBy: [{ active: 'desc' }, { name: 'asc' }],
+        include: {
+          user: { select: { id: true, name: true, email: true, status: true } },
+          knittingRuns: { where: { status: 'RUNNING' }, select: { id: true, runNo: true, machine: { select: { id: true, code: true } } }, orderBy: { startedAt: 'asc' } },
+          _count: { select: { knittingRuns: true } },
+        },
+      }),
+      this.prisma.expense.groupBy({
+        by: ['employeeId'],
+        where: { cancelledAt: null, employeeId: { not: null }, expenseDate: { gte: monthStart } },
+        _sum: { amount: true },
+      }),
+    ]);
+    const paidBy = new Map(paid.map((row) => [row.employeeId!, Math.round(Number(row._sum.amount ?? 0) * 100) / 100]));
+    return employees.map((e) => ({ ...e, paidThisMonth: paidBy.get(e.id) ?? 0 }));
   }
 
   /** Next free EMP-NNN code, padded to at least three digits; inactive employees count so a code is never reused. */
@@ -533,7 +549,10 @@ export class MastersService {
     if (clash) throw new ConflictException(`Code ${code} is already used by ${clash.name}${clash.active ? '' : ' (inactive employee)'}`);
   }
 
-  /** One employee's page: details, the login linked to them, and the knitting runs they operated. */
+  /**
+   * One employee's page: details, the login linked to them, and the knitting runs they operated with each run's fabric,
+   * yarn and day-by-day production (what they knitted, day by day, on which machine).
+   */
   async employeeAccount(id: string) {
     const employee = await this.prisma.employee.findUnique({
       where: { id },
@@ -556,12 +575,21 @@ export class MastersService {
         yarnKg: true,
         outputKg: true,
         rollCount: true,
+        endReason: true,
         machine: { select: { id: true, code: true, name: true } },
+        yarns: { select: { itemCode: true, lotNo: true }, orderBy: { kg: 'desc' } },
+        productionFlow: { select: { flowNo: true, yarnCount: true, fabricDiameter: true, fabricGsm: true, knittingGg: true, knittingLl: true, color: true } },
+        days: { select: { id: true, date: true, outputKg: true, rollCount: true }, orderBy: { date: 'desc' } },
       },
     });
     return {
       employee,
-      runs: runs.map((run) => ({ ...run, yarnKg: Number(run.yarnKg), outputKg: run.outputKg === null ? null : Number(run.outputKg) })),
+      runs: runs.map((run) => ({
+        ...run,
+        yarnKg: Number(run.yarnKg),
+        outputKg: run.outputKg === null ? null : Number(run.outputKg),
+        days: run.days.map((day) => ({ ...day, date: day.date.toISOString().slice(0, 10), outputKg: Number(day.outputKg) })),
+      })),
     };
   }
 

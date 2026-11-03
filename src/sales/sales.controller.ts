@@ -32,6 +32,11 @@ export class SalesController {
     return this.sales.context();
   }
 
+  /** The Sales page's figures over every sale: waiting, sent back, billed this month, to collect, overdue, who owes. */
+  @Get('summary') summary() {
+    return this.sales.summary();
+  }
+
   /** Sales waiting for a warehouse to verify and dispatch; shown on its Warehouses page. */
   @Get('outgoing')
   @Roles(...GODOWN_ROLES)
