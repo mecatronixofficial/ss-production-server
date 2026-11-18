@@ -1,6 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import { FabricProductionFlow, Prisma } from '@prisma/client';
 import { ProductionService } from './production.service';
+import { KnittingService } from '../knitting/knitting.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { StorageService } from '../storage/storage.service';
@@ -49,6 +50,8 @@ describe('Production state and balances', () => {
       stockTransaction: { findFirst: jest.fn().mockResolvedValue({ itemName: 'Fabric' }) },
       warehouse: { findFirst: jest.fn().mockResolvedValue({ id: 'wh', active: true, code: 'WH' }) },
       fabricFlowDelivery: { findFirst: jest.fn().mockResolvedValue(null) },
+      // No own-mill machine still knitting.
+      knittingRun: { findMany: jest.fn().mockResolvedValue([]) },
       $queryRaw: jest.fn().mockResolvedValue([{ value: 1 }]),
       processChallan: {
         findUnique: jest.fn().mockResolvedValue(null),
@@ -69,7 +72,7 @@ describe('Production state and balances', () => {
       createTxn: jest.fn().mockResolvedValue({ id: 'return-txn' }),
       availableWithin: jest.fn().mockResolvedValue(250),
     };
-    const service = new ProductionService(db as unknown as PrismaService, inventory as unknown as InventoryService, {} as StorageService);
+    const service = new ProductionService(db as unknown as PrismaService, inventory as unknown as InventoryService, {} as StorageService, {} as KnittingService);
     return { service, tx, inventory };
   };
 
@@ -252,7 +255,7 @@ describe('Production state and balances', () => {
       },
       warehouse: { findMany: jest.fn().mockResolvedValue([{ id: 'w1', code: 'YRN', name: 'Yarn store' }, { id: 'w2', code: 'GRY', name: 'Grey store' }]) },
     };
-    const service = new ProductionService(db as unknown as PrismaService, {} as InventoryService, {} as StorageService);
+    const service = new ProductionService(db as unknown as PrismaService, {} as InventoryService, {} as StorageService, {} as KnittingService);
     const result = await service.overview();
     expect(result.machines).toMatchObject({ total: 3, byStatus: { RUNNING: 2, IDLE: 1 }, running: [{ runNo: 'Y1-R1', outputKg: 120.5, rollCount: 5, dayCount: 2, yarnKg: 300 }] });
     expect(result.machines.list).toHaveLength(3);
@@ -335,7 +338,7 @@ describe('Dyeing lots', () => {
     };
     const db = { $transaction: <T>(fn: (client: typeof tx) => Promise<T>) => fn(tx) };
     const inventory = { issueWithin: jest.fn().mockResolvedValue({ id: 'grey-issue' }) };
-    const service = new ProductionService(db as unknown as PrismaService, inventory as unknown as InventoryService, {} as StorageService);
+    const service = new ProductionService(db as unknown as PrismaService, inventory as unknown as InventoryService, {} as StorageService, {} as KnittingService);
     return { service, tx, created, inventory };
   };
   const start = { startDate: '2026-10-22', partyDetails: 'Colour house', millDetails: 'Colour house' };
@@ -409,8 +412,9 @@ describe('Knitting several fabric types from one yarn', () => {
     };
     const inventory = { availableWithin: jest.fn().mockResolvedValue(available), issueWithin: jest.fn().mockImplementation(({ referenceId }: { referenceId: string }) => Promise.resolve({ id: `issue-${referenceId}` })) };
     const db = { $transaction: <T>(fn: (client: typeof tx) => Promise<T>) => fn(tx) };
-    const service = new ProductionService(db as unknown as PrismaService, inventory as unknown as InventoryService, {} as StorageService);
-    return { service, created, inventory };
+    const knitting = { assignWithin: jest.fn().mockResolvedValue([]) };
+    const service = new ProductionService(db as unknown as PrismaService, inventory as unknown as InventoryService, {} as StorageService, knitting as unknown as KnittingService);
+    return { service, created, inventory, knitting, tx };
   };
   const start = {
     millType: 'OTHER' as const,
@@ -453,6 +457,40 @@ describe('Knitting several fabric types from one yarn', () => {
 
   it('refuses more yarn than there is', async () => {
     await expect(setup(300).service.startKnitting({ ...start, fabrics: [{ fabricType: 'A', fabricDiameter: '30', yarnKg: 400 }] }, user)).rejects.toThrow('Only 300.000 KG of 01SS26');
+  });
+
+  it('starts the selected machines for each own-mill type inside the stock transaction', async () => {
+    const { service, knitting, tx, inventory } = setup();
+    const fabrics = [
+      { fabricType: 'Single jersey', fabricDiameter: '30', machines: [{ machineId: 'm1', operatorId: 'operator', ratePerKg: 12 }] },
+      { fabricType: 'Rib', fabricDiameter: '24', machines: [{ machineId: 'm2' }] },
+    ];
+    await service.startKnitting({ ...start, millType: 'OWN', startShift: 'DAY', fabrics }, user);
+    expect(knitting.assignWithin).toHaveBeenNthCalledWith(1, tx, 'kt-1', { startDate: start.startDate, startShift: 'DAY', machines: fabrics[0].machines }, user);
+    expect(knitting.assignWithin).toHaveBeenNthCalledWith(2, tx, 'kt-2', { startDate: start.startDate, startShift: 'DAY', machines: fabrics[1].machines }, user);
+    expect(inventory.issueWithin).toHaveBeenCalledTimes(1);
+    expect(tx.$executeRaw).toHaveBeenCalled();
+  });
+
+  it('requires machines for every own-mill fabric and rejects duplicate selections before issuing yarn', async () => {
+    const { service, inventory } = setup();
+    await expect(service.startKnitting({ ...start, millType: 'OWN', startShift: 'DAY', fabrics: [{ fabricType: 'Rib', fabricDiameter: '24' }] }, user)).rejects.toThrow('Choose at least one machine');
+    const fabric = { fabricType: 'Rib', fabricDiameter: '24', machines: [{ machineId: 'm1' }] };
+    await expect(service.startKnitting({ ...start, millType: 'OWN', startShift: 'DAY', fabrics: [fabric, fabric] }, user)).rejects.toThrow('only one fabric type');
+    expect(inventory.issueWithin).not.toHaveBeenCalled();
+  });
+
+  it('requires a start shift and refuses machine selections for outside mills', async () => {
+    const { service, inventory } = setup();
+    await expect(service.startKnitting({ ...start, millType: 'OWN', machines: [{ machineId: 'm1' }] }, user)).rejects.toThrow('start shift');
+    await expect(service.startKnitting({ ...start, machines: [{ machineId: 'm1' }] }, user)).rejects.toThrow('only be selected for own-mill');
+    expect(inventory.issueWithin).not.toHaveBeenCalled();
+  });
+
+  it('propagates a failed machine start so the stock transaction rolls back', async () => {
+    const { service, knitting } = setup();
+    knitting.assignWithin.mockRejectedValue(new BadRequestException('Machine is already knitting'));
+    await expect(service.startKnitting({ ...start, millType: 'OWN', startShift: 'DAY', fabricType: 'Rib', fabricDiameter: '24', machines: [{ machineId: 'm1' }] }, user)).rejects.toThrow('already knitting');
   });
 });
 
@@ -515,7 +553,7 @@ describe('Each process delivers its fabric when it finishes', () => {
       auditLog: { create: jest.fn() },
     };
     const db = { $transaction: <T>(fn: (client: typeof tx) => Promise<T>) => fn(tx), warehouse: tx.warehouse };
-    const service = new ProductionService(db as unknown as PrismaService, {} as InventoryService, {} as StorageService);
+    const service = new ProductionService(db as unknown as PrismaService, {} as InventoryService, {} as StorageService, {} as KnittingService);
     return { service, tx };
   };
 
@@ -584,7 +622,7 @@ describe('A process puts the fabric it did not use back in a warehouse', () => {
     };
     const inventory = { createTxn: jest.fn().mockResolvedValue({ id: 'back' }), removeInWithin: jest.fn() };
     const db = { $transaction: <T>(fn: (client: typeof tx) => Promise<T>) => fn(tx), warehouse: tx.warehouse };
-    const service = new ProductionService(db as unknown as PrismaService, inventory as unknown as InventoryService, {} as StorageService);
+    const service = new ProductionService(db as unknown as PrismaService, inventory as unknown as InventoryService, {} as StorageService, {} as KnittingService);
     return { service, tx, inventory };
   };
   const dyed = {

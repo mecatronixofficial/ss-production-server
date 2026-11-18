@@ -3,5 +3,5 @@ import { InventoryModule } from '../inventory/inventory.module';
 import { KnittingController } from './knitting.controller';
 import { KnittingService } from './knitting.service';
 
-@Module({ imports: [InventoryModule], controllers: [KnittingController], providers: [KnittingService] })
+@Module({ imports: [InventoryModule], controllers: [KnittingController], providers: [KnittingService], exports: [KnittingService] })
 export class KnittingModule {}

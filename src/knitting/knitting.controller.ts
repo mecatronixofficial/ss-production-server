@@ -7,6 +7,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { MACHINE_ROLES } from '../common/roles';
 import { AssignMachinesDto, CompleteTaskDto, DayEntriesDto, FinishRunDto, MoveRunDto, StartRunDto } from './dto/knitting-run.dto';
 import { KnittingService } from './knitting.service';
+import { MachineReportQueryDto } from './dto/machine-report.dto';
 
 /** Knitting machines: tasks put on machines, production recorded day by day as grey fabric, machines changed or stopped. */
 @Controller('knitting')
@@ -23,6 +24,11 @@ export class KnittingController {
   @Get('board')
   board() {
     return this.service.board();
+  }
+
+  @Get('report')
+  report(@Query() query: MachineReportQueryDto, @CurrentUser() user: AuthUser) {
+    return this.service.report(query, user);
   }
 
   @Get('runs')

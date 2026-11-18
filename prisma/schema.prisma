@@ -145,6 +145,9 @@ model Supplier {
   gst              String?
   address          String?
   materialCategory String?
+  /// Links a mill's purchases to the existing receipt and payable ledger.
+  millId           String?            @unique
+  mill             Mill?              @relation(fields: [millId], references: [id], onDelete: Restrict)
   paymentTerms     String?
   openingBalance   Decimal            @default(0) @db.Decimal(14, 2)
   active           Boolean            @default(true)
@@ -206,6 +209,8 @@ model Mill {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
+  purchaseSupplier Supplier?
+
   @@index([active, name])
 }
 
@@ -227,7 +232,7 @@ model Warehouse {
   stockBills       StockBill[]
   createdAt        DateTime               @default(now())
   updatedAt        DateTime               @updatedAt
-  yarnReceipts YarnReceipt[]
+  yarnReceipts     YarnReceipt[]
 }
 
 model Employee {
@@ -450,6 +455,8 @@ model PurchaseOrderItem {
   quantity        Decimal               @db.Decimal(14, 3)
   unit            String
   rate            Decimal               @db.Decimal(14, 2)
+  /// New items default to 18%; existing orders retain their saved GST percentage.
+  gstRate         Decimal               @default(18) @db.Decimal(5, 2)
   /// Its details as ordered, by material: yarn count, quality, blend, mill, shade, bags…; fabric type, dia, GSM,
   /// colour, rolls…; brand, grade, pack size… — `[{ label, value }]`, printed under it on challans and bills.
   specs           Json?
@@ -752,37 +759,37 @@ enum ProcessDeliveryDestination {
 /// code (SS-2026-003, or SS-2026-003-2 for a second batch from the same yarn). Older batches started with
 /// a purchase entry (PI, party, mill) and keep those fields.
 model FabricProductionFlow {
-  id     String           @id @default(uuid())
+  id       String                 @id @default(uuid())
   /// Batch code, written on the bags and followed through every process: a knitting batch is the yarn's code and
   /// -KT01 (01SS26-KT01); each colour it is dyed in is a dyeing lot, -DY01 on that (01SS26-KT01-DY01), compacted and
   /// delivered under the same code. Older batches keep their codes (SS-2026-003-D1).
-  flowNo String           @unique
+  flowNo   String                 @unique
   /// A dyeing lot's knitting batch: the lot took part (or all) of that batch's grey fabric.
   parentId String?
   parent   FabricProductionFlow?  @relation("DyeingLots", fields: [parentId], references: [id])
   lots     FabricProductionFlow[] @relation("DyeingLots")
-  status FabricFlowStatus @default(PURCHASED)
-  source FabricSource     @default(PURCHASE)
+  status   FabricFlowStatus       @default(PURCHASED)
+  source   FabricSource           @default(PURCHASE)
 
   /// The yarn taken from stock: its item code, warehouse and lot, and the stock movement that took it out.
-  yarnItemCode    String?
-  yarnWarehouseId String?
-  yarnWarehouse   Warehouse? @relation(fields: [yarnWarehouseId], references: [id])
-  yarnLotNo       String?
-  yarnIssueTxnId  String?
+  yarnItemCode        String?
+  yarnWarehouseId     String?
+  yarnWarehouse       Warehouse? @relation(fields: [yarnWarehouseId], references: [id])
+  yarnLotNo           String?
+  yarnIssueTxnId      String?
   /// The yarn knitting did not use, put back into stock when knitting finished.
-  yarnReturnTxnId String?
+  yarnReturnTxnId     String?
   /// Grey fabric dyeing did not use, back in a warehouse (a dyeing lot's under its knitting batch's code).
-  dyeingBalanceKg   Decimal? @db.Decimal(14, 3)
-  greyReturnTxnId   String?
+  dyeingBalanceKg     Decimal?   @db.Decimal(14, 3)
+  greyReturnTxnId     String?
   /// Dyed fabric compacting did not use, back in a warehouse under the batch's code.
-  compactingBalanceKg Decimal? @db.Decimal(14, 3)
+  compactingBalanceKg Decimal?   @db.Decimal(14, 3)
   dyedReturnTxnId     String?
   /// The fabric made from this yarn.
-  fabricType      String?
-  fabricDiameter  String?
+  fabricType          String?
+  fabricDiameter      String?
   /// Fabric weight in grams per square metre, e.g. "180" (optional, as typed).
-  fabricGsm       String?
+  fabricGsm           String?
 
   /// Knitting start date for batches started from stock; the purchase date on older batches.
   purchaseDate      DateTime
@@ -811,10 +818,9 @@ model FabricProductionFlow {
   knittingDeliveryKg             Decimal?                   @db.Decimal(14, 3)
   knittingExpense                Decimal                    @default(0) @db.Decimal(14, 2)
   dyeingDeliveryKg               Decimal?                   @db.Decimal(14, 3)
-  /// Knitting is started (knittingDate), then finished: bags, total weight (knittingDeliveryKg, which goes on to dyeing), place.
-  knittingExpectedFinishDate     DateTime?
   /// The fabric this knitting is meant to make; the yarn sent was worked out from it (with the usual knitting loss).
   plannedFabricKg                Decimal?                   @db.Decimal(14, 3)
+  /// Knitting is started (knittingDate), then finished: bags, total weight (knittingDeliveryKg, which goes on to dyeing), place.
   knittingFinishedAt             DateTime?
   knittingBagCount               Int?
   knittingDeliveryPlace          String?

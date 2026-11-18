@@ -4,7 +4,9 @@ import { AuthUser } from '../common/auth-user';
 import { lockKeys } from '../common/locks';
 import { InventoryService } from '../inventory/inventory.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { MACHINE_ROLES } from '../common/roles';
+import { ADMIN_ROLES, MACHINE_ROLES } from '../common/roles';
+import { MachineReportQueryDto } from './dto/machine-report.dto';
+import { machineProductionReport } from './machine-production-report';
 import { notifyRoles } from '../notifications/notify.util';
 import { notifyProcessDone } from '../production/process-notify';
 import { AssignMachineDto, AssignMachinesDto, CompleteTaskDto, DayEntriesDto, FinishRunDto, MoveRunDto, StartRunDto } from './dto/knitting-run.dto';
@@ -37,7 +39,6 @@ const runInclude = {
       fabricGsm: true,
       knittingGg: true,
       knittingLl: true,
-      knittingExpectedFinishDate: true,
       knittingFinishedAt: true,
       // Every machine on the task, so a run knows where the rest of its task's work is.
       knittingRuns: { select: { id: true, runNo: true, status: true, outputKg: true, machine: { select: { id: true, code: true } } }, orderBy: { createdAt: 'asc' } },
@@ -115,6 +116,10 @@ export class KnittingService {
     private inventory: InventoryService,
   ) {}
 
+  report(query: MachineReportQueryDto, user: AuthUser) {
+    return machineProductionReport(this.prisma, query, ADMIN_ROLES.includes(user.role));
+  }
+
   /** Machines, operators, warehouses, and which machines are knitting now. */
   async context() {
     const [machines, operators, warehouses, busy] = await Promise.all([
@@ -173,7 +178,6 @@ export class KnittingService {
         knittingLl: true,
         knittingPartyDetails: true,
         knittingDate: true,
-        knittingExpectedFinishDate: true,
         // With id, flowNo and purchasedWeightKg above: what its share of a shared yarn needs.
         yarnIssueTxnId: true,
         yarnReturnTxnId: true,
@@ -181,7 +185,7 @@ export class KnittingService {
         knittingFinishedAt: true,
         knittingRuns: { select: { id: true, runNo: true, status: true, outputKg: true, yarnKg: true, machine: { select: { id: true, code: true, name: true } } }, orderBy: { createdAt: 'asc' } },
       },
-      orderBy: [{ knittingExpectedFinishDate: { sort: 'asc', nulls: 'last' } }, { purchaseDate: 'asc' }],
+      orderBy: [{ purchaseDate: 'asc' }],
     });
     // Fabric types started together share one yarn: what is left of it for each, from all of them (finished too).
     const issues = [...new Set(flows.map((f) => f.yarnIssueTxnId).filter((id): id is string => !!id))];
@@ -464,17 +468,29 @@ export class KnittingService {
 
   /** Puts a Production knitting task on one or more free machines at once. No machine is limited to a load. */
   async assign(flowId: string, dto: AssignMachinesDto, user: AuthUser) {
+    return this.prisma.$transaction((tx) => this.assignWithin(tx, flowId, dto, user));
+  }
+
+  /** Also used by Production so reserving yarn, creating batches and starting machines commit together. */
+  async assignWithin(tx: Prisma.TransactionClient, flowId: string, dto: AssignMachinesDto, user: AuthUser) {
     const ids = dto.machines.map((m) => m.machineId);
+    if (!ids.length) throw new BadRequestException('Choose at least one machine');
     if (new Set(ids).size !== ids.length) throw new BadRequestException('The same machine is chosen twice');
-    return this.prisma.$transaction(async (tx) => {
-      await lockKeys(tx, `production-batch:${flowId}`, ...ids.map((id) => `knitting-machine:${id}`));
-      const task = await this.openTask(tx, flowId);
-      const created: string[] = [];
-      for (const pick of dto.machines) created.push(await this.startOnMachine(tx, task, pick, dto, user));
-      await this.syncProductionTask(tx, task.id);
-      const runs = await tx.knittingRun.findMany({ where: { id: { in: created } }, include: runInclude, orderBy: { runNo: 'asc' } });
-      return runs.map(runView);
-    });
+    // Factory shifts follow IST: Day starts at 9 AM; before 9 AM it is the previous day's Night shift.
+    const factoryNow = new Date(Date.now() + 330 * 60_000);
+    const hour = factoryNow.getUTCHours();
+    if (hour < 9) factoryNow.setUTCDate(factoryNow.getUTCDate() - 1);
+    const currentShift = hour >= 9 && hour < 21 ? KnittingShift.DAY : KnittingShift.NIGHT;
+    if (shiftIndex(new Date(dto.startDate), dto.startShift) > shiftIndex(new Date(isoDay(factoryNow)), currentShift)) {
+      throw new BadRequestException('The start shift is still to come');
+    }
+    await lockKeys(tx, `production-batch:${flowId}`, ...ids.map((id) => `knitting-machine:${id}`));
+    const task = await this.openTask(tx, flowId);
+    const created: string[] = [];
+    for (const pick of dto.machines) created.push(await this.startOnMachine(tx, task, pick, dto, user));
+    await this.syncProductionTask(tx, task.id);
+    const runs = await tx.knittingRun.findMany({ where: { id: { in: created } }, include: runInclude, orderBy: { runNo: 'asc' } });
+    return runs.map(runView);
   }
 
   /** One machine for a task (kept for older callers of `POST /knitting/runs`). */
@@ -612,6 +628,29 @@ export class KnittingService {
         newValue: { runNo: run.runNo, outputKg, rollCount: done.rollCount, days: days.length, endReason: opts.endReason ?? null, completeTask: opts.completeTask ?? null },
       },
     });
+  }
+
+  /**
+   * Stops a Production task's machines as its knitting is finished from Production, inside that transaction: each
+   * run gets its last day's production (into `warehouseId`) and stops; the task is completed by the caller. The
+   * caller holds the batch and run locks.
+   */
+  async stopTaskRunsWithin(
+    tx: Prisma.TransactionClient,
+    flowId: string,
+    opts: { date: Date; shift: KnittingShift; warehouseId?: string; stops: Array<{ runId: string; outputKg?: number; rollCount?: number }> },
+    user: AuthUser,
+  ) {
+    for (const stop of opts.stops) {
+      const run = await this.loadRun(tx, stop.runId);
+      if (run.productionFlowId !== flowId) throw new BadRequestException(`${run.runNo} is not knitting this batch`);
+      await this.finishWithin(
+        tx,
+        run,
+        { date: opts.date, shift: opts.shift, outputKg: stop.outputKg, rollCount: stop.rollCount, warehouseId: stop.outputKg !== undefined ? opts.warehouseId : undefined, completeTask: false },
+        user,
+      );
+    }
   }
 
   async finish(id: string, dto: FinishRunDto, user: AuthUser) {

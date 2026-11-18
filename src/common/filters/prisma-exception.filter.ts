@@ -3,22 +3,30 @@ import { Prisma } from '@prisma/client';
 import { Response } from 'express';
 
 /**
- * Maps Prisma's known request errors to proper HTTP responses instead of a
+ * Maps Prisma's request and initialization errors to proper HTTP responses instead of a
  * generic 500. The body keeps Nest's `{ statusCode, message, error }` shape,
  * which the frontend reads to show toast messages.
  */
-@Catch(Prisma.PrismaClientKnownRequestError)
+@Catch(Prisma.PrismaClientKnownRequestError, Prisma.PrismaClientInitializationError)
 export class PrismaExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(PrismaExceptionFilter.name);
 
-  catch(exception: Prisma.PrismaClientKnownRequestError, host: ArgumentsHost) {
+  catch(exception: Prisma.PrismaClientKnownRequestError | Prisma.PrismaClientInitializationError, host: ArgumentsHost) {
     const response = host.switchToHttp().getResponse<Response>();
     const [status, message] = this.map(exception);
-    if (status >= 500) this.logger.error(`${exception.code}: ${exception.message}`, exception.stack);
+    const code = exception instanceof Prisma.PrismaClientKnownRequestError ? exception.code : exception.errorCode;
+    if (status >= 500) this.logger.error(`${code ?? 'unknown'}: ${exception.message}`, exception.stack);
     response.status(status).json({ statusCode: status, message, error: HttpStatus[status] ?? 'Error' });
   }
 
-  private map(exception: Prisma.PrismaClientKnownRequestError): [number, string] {
+  private map(exception: Prisma.PrismaClientKnownRequestError | Prisma.PrismaClientInitializationError): [number, string] {
+    const code = exception instanceof Prisma.PrismaClientKnownRequestError ? exception.code : exception.errorCode;
+    if (code === 'P1001' || code === 'P1002' || code === 'P1017') {
+      return [HttpStatus.SERVICE_UNAVAILABLE, 'The database is temporarily unavailable. Please try again shortly.'];
+    }
+    if (!(exception instanceof Prisma.PrismaClientKnownRequestError)) {
+      return [HttpStatus.INTERNAL_SERVER_ERROR, 'Internal server error'];
+    }
     switch (exception.code) {
       case 'P2002': {
         const target = exception.meta?.target;
