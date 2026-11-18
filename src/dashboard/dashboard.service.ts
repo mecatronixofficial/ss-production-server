@@ -225,7 +225,6 @@ export class DashboardService {
         currentKg: view.metrics.currentWeightKg,
         lossPct: view.metrics.lossPct,
         daysInStage: days(stageSince(flow)),
-        dueDate: flow.status === 'KNITTING' && !flow.knittingFinishedAt ? flow.knittingExpectedFinishDate?.toISOString() ?? null : null,
         place:
           flow.status === 'KNITTING'
             ? flow.knittingFinishedAt ? `Grey fabric · ${flow.dyeingPartyDetails ?? 'waiting for dyeing'}` : flow.knittingMillType === 'OWN' ? 'Own machines' : flow.knittingPartyDetails ?? 'Outside mill'

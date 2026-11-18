@@ -138,7 +138,6 @@ export async function itemJourney(prisma: PrismaService, code: string, opts: { p
         party: f.knittingPartyDetails,
         mill: f.knittingMillDetails,
         startedAt: f.knittingDate,
-        expectedFinish: f.knittingExpectedFinishDate,
         finishedAt: f.knittingFinishedAt,
         rolls: f.knittingBagCount,
         outputKg: v.knittingDeliveryKg,

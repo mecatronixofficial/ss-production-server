@@ -558,7 +558,7 @@ export function reportDefinitions(prisma: PrismaService, money: MoneyService): R
       key: 'purchase-orders',
       title: 'Purchase orders',
       group: 'Purchases',
-      description: 'Distributor POs with ordered, received and pending value.',
+      description: 'Purchase orders from distributors and mills with ordered, received and pending value.',
       dateLabel: 'PO date',
       top: { label: 'supplier', value: 'orderedValue' },
       async build(range) {
@@ -585,7 +585,6 @@ export function reportDefinitions(prisma: PrismaService, money: MoneyService): R
             // Nothing more is expected on a cancelled or closed-short PO.
             pendingValue: po.status === 'CANCELLED' || po.status === 'CLOSED' ? 0 : round(Math.max(0, ordered - received), 2),
             receivedPct: pct(received, ordered),
-            expectedDate: iso(po.expectedDate),
             lastReceipt: iso(last),
             status: po.status,
           };
@@ -595,13 +594,12 @@ export function reportDefinitions(prisma: PrismaService, money: MoneyService): R
           columns: [
             col('poNo', 'PO no', 'text'),
             col('orderDate', 'PO date', 'date'),
-            col('supplier', 'Distributor', 'text'),
+            col('supplier', 'Supplier', 'text'),
             col('items', 'Items', 'text'),
             col('orderedValue', 'Ordered value', 'money', true),
             col('receivedValue', 'Received value', 'money', true),
             col('pendingValue', 'Pending value', 'money', true),
             col('receivedPct', 'Received', 'pct'),
-            col('expectedDate', 'Expected', 'date'),
             col('lastReceipt', 'Last GRN', 'date'),
             col('status', 'Status', 'status'),
           ],

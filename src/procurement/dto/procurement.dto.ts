@@ -12,6 +12,7 @@ import {
   IsString,
   IsUUID,
   Matches,
+  Max,
   MaxLength,
   Min,
   ValidateNested,
@@ -60,12 +61,23 @@ export class PurchaseOrderItemDto {
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   rate!: number;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(100)
+  gstRate?: number = 18;
 }
 
 export class CreatePurchaseOrderDto {
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
-  supplierId!: string;
+  supplierId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  millId?: string;
 
   /** The warehouse the material is delivered to; its page shows the PO as waiting to be received. */
   @IsUUID()

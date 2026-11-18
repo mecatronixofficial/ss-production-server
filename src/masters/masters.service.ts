@@ -37,7 +37,7 @@ export class MastersService {
    */
   async suppliers() {
     const [suppliers, received, paid, open, lastOrders] = await Promise.all([
-      this.prisma.supplier.findMany({ orderBy: [{ active: 'desc' }, { name: 'asc' }] }),
+      this.prisma.supplier.findMany({ where: { millId: null }, orderBy: [{ active: 'desc' }, { name: 'asc' }] }),
       this.prisma.$queryRaw<Array<{ supplierId: string; value: number }>>`
         SELECT po."supplierId" AS "supplierId", COALESCE(SUM(ri."quantity" * poi."rate"), 0)::float8 AS "value"
         FROM "PurchaseReceiptItem" ri
@@ -355,7 +355,7 @@ export class MastersService {
     const code = d.code.trim().toUpperCase();
     const clash = await this.prisma.mill.findFirst({ where: { OR: [{ code: { equals: code, mode: 'insensitive' } }, { name: { equals: d.name.trim(), mode: 'insensitive' } }] } });
     if (clash) throw new ConflictException(`${clash.code} · ${clash.name} already exists`);
-    return this.prisma.mill.create({ data: { ...d, code, name: d.name.trim() } });
+    return this.prisma.mill.create({ data: { ...d, code, name: d.name.trim(), services: d.services ?? 'KNITTING,DYEING,COMPACTING' } });
   }
 
   async updateMill(id: string, d: UpdateMillDto) {

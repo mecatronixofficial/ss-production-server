@@ -11,6 +11,8 @@ import { ADMIN_ROLES } from '../common/roles';
 import { InventoryService } from '../inventory/inventory.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreatePurchaseOrderDto, ReceivePurchaseOrderDto } from './dto/procurement.dto';
+import { purchaseMoney } from './purchase-money';
+import { purchaseParty, resolvePurchaseSupplier } from './purchase-parties';
 import { linesText, MANAGEMENT_ROLES, notifyRoles, settleReminders } from '../notifications/notify.util';
 
 /** Purchase orders that can still receive material. */
@@ -20,7 +22,7 @@ const OPEN_STATUSES: PurchaseOrderStatus[] = [PurchaseOrderStatus.ORDERED, Purch
 const RECEIVING_ROLES: Role[] = [...MANAGEMENT_ROLES, Role.STAFF];
 
 const purchaseOrderInclude = {
-  supplier: true,
+  supplier: { include: { mill: true } },
   warehouse: true,
   items: { include: { receiptItems: true } },
   receipts: { include: { warehouse: true, items: true }, orderBy: { receivedAt: 'desc' as const } },
@@ -87,7 +89,8 @@ export class ProcurementService {
     const prices = canSeePrices(user);
     return rows.map((po) => ({
       ...po,
-      items: prices ? po.items : po.items.map((item) => ({ ...item, rate: null })),
+      ...purchaseMoney(po.items, prices),
+      supplier: purchaseParty(po.supplier),
       receipts: po.receipts.map((receipt) => ({
         ...receipt,
         receivedBy: (receipt.receivedById && nameOf.get(receipt.receivedById)) || null,
@@ -122,7 +125,7 @@ export class ProcurementService {
       where: { category: 'YARN', purchaseOrder: { status: { not: PurchaseOrderStatus.CANCELLED } } },
       include: {
         purchaseOrder: {
-          select: { id: true, poNo: true, orderDate: true, expectedDate: true, status: true, supplier: { select: { code: true, name: true } }, warehouse: { select: { code: true } } },
+          select: { id: true, poNo: true, orderDate: true, expectedDate: true, status: true, supplier: { select: { code: true, name: true, millId: true, mill: true } }, warehouse: { select: { code: true } } },
         },
         receiptItems: {
           include: { purchaseReceipt: { select: { id: true, receiptNo: true, receivedAt: true, challanNo: true, vehicleNo: true, lotNo: true, warehouse: { select: { code: true } } } } },
@@ -139,7 +142,7 @@ export class ProcurementService {
       const rate = prices ? Number(line.rate) : null;
       return {
         id: line.id,
-        po: line.purchaseOrder,
+        po: { ...line.purchaseOrder, supplier: purchaseParty(line.purchaseOrder.supplier) },
         itemName: line.itemName,
         itemCode: line.itemCode,
         unit: line.unit,
@@ -181,11 +184,12 @@ export class ProcurementService {
   }
 
   async context() {
-    const [suppliers, warehouses] = await Promise.all([
-      this.prisma.supplier.findMany({ where: { active: true }, orderBy: { name: 'asc' } }),
+    const [suppliers, mills, warehouses] = await Promise.all([
+      this.prisma.supplier.findMany({ where: { active: true, millId: null }, orderBy: { name: 'asc' } }),
+      this.prisma.mill.findMany({ where: { active: true }, select: { id: true, code: true, name: true }, orderBy: { name: 'asc' } }),
       this.prisma.warehouse.findMany({ where: { active: true }, orderBy: { name: 'asc' } }),
     ]);
-    return { suppliers, warehouses };
+    return { suppliers, mills, warehouses };
   }
 
   /** The office's register of received challans (goods receipts), newest first, optionally within dates. */
@@ -195,7 +199,7 @@ export class ProcurementService {
       include: {
         warehouse: { select: { code: true, name: true } },
         items: { include: { purchaseOrderItem: { select: { itemName: true, itemCode: true, unit: true, rate: true } } } },
-        purchaseOrder: { select: { id: true, poNo: true, supplier: { select: { code: true, name: true } } } },
+        purchaseOrder: { select: { id: true, poNo: true, supplier: { select: { code: true, name: true, millId: true, mill: true } } } },
       },
       orderBy: { receivedAt: 'desc' },
       take: 2000,
@@ -214,7 +218,7 @@ export class ProcurementService {
       receivedBy: (r.receivedById && nameOf.get(r.receivedById)) || null,
       warehouse: r.warehouse,
       purchaseOrder: { id: r.purchaseOrder.id, poNo: r.purchaseOrder.poNo },
-      supplier: r.purchaseOrder.supplier,
+      supplier: purchaseParty(r.purchaseOrder.supplier),
       items: r.items.map((line) => ({
         itemName: line.purchaseOrderItem.itemName,
         itemCode: line.purchaseOrderItem.itemCode,
@@ -239,7 +243,7 @@ export class ProcurementService {
         purchaseOrder: {
           include: {
             supplier: {
-              select: { id: true, code: true, name: true, company: true, contactPerson: true, mobile: true, gst: true, address: true },
+              select: { id: true, code: true, name: true, company: true, contactPerson: true, mobile: true, gst: true, address: true, millId: true, mill: true },
             },
             warehouse: { select: { id: true, code: true, name: true } },
             items: { include: { receiptItems: { include: { purchaseReceipt: { select: { receiptNo: true } } } } } },
@@ -317,7 +321,7 @@ export class ProcurementService {
         status: po.status,
         warehouse: po.warehouse,
       },
-      supplier: po.supplier,
+      supplier: purchaseParty(po.supplier),
       lines,
       total: prices ? lines.reduce((sum, line) => sum + (line.amount ?? 0), 0) : null,
       pricesShown: prices,
@@ -328,12 +332,11 @@ export class ProcurementService {
   async create(dto: CreatePurchaseOrderDto, user: AuthUser) {
     const fractionalGrams = dto.items.find((item) => purchaseUnit(item.unit) === 'G' && !Number.isInteger(item.quantity));
     if (fractionalGrams) throw new BadRequestException(`${fractionalGrams.itemName}: grams are whole numbers`);
-    const supplier = await this.prisma.supplier.findFirst({ where: { id: dto.supplierId, active: true } });
-    if (!supplier) throw new BadRequestException('Select an active distributor');
     const warehouse = await this.prisma.warehouse.findFirst({ where: { id: dto.warehouseId, active: true } });
     if (!warehouse) throw new BadRequestException('Select an active warehouse to deliver to');
 
     return this.prisma.$transaction(async (tx) => {
+      const supplier = await resolvePurchaseSupplier(tx, dto);
       const purchaseOrder = await tx.purchaseOrder.create({
         data: {
           poNo: await documentNo(tx, 'PUR'),
@@ -349,6 +352,7 @@ export class ProcurementService {
               quantity: item.quantity,
               unit: purchaseUnit(item.unit),
               rate: item.rate,
+              gstRate: item.gstRate ?? 18,
               specs: specsOf(item.specs),
             })),
           },
@@ -394,7 +398,7 @@ export class ProcurementService {
         },
         user.id,
       );
-      return purchaseOrder;
+      return { ...purchaseOrder, ...purchaseMoney(purchaseOrder.items, canSeePrices(user)), supplier: purchaseParty(purchaseOrder.supplier) };
     });
   }
 

@@ -5,8 +5,8 @@
   "scripts": {
     "build": "prisma generate && prisma migrate deploy && nest build",
     "build:app": "prisma generate && nest build",
-    "start": "nest start",
-    "start:dev": "nest start --watch",
+    "start": "prisma generate && nest start",
+    "start:dev": "prisma generate && nest start --watch",
     "start:prod": "node dist/main",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "eslint \"{src,test,prisma}/**/*.ts\"",

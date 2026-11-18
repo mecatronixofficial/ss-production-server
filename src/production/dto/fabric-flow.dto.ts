@@ -1,4 +1,5 @@
-import { FabricDeliveryDestination, KnittingMillType, ProcessDeliveryDestination, StockCategory } from '@prisma/client';
+import { FabricDeliveryDestination, KnittingMillType, KnittingShift, ProcessDeliveryDestination, StockCategory } from '@prisma/client';
+import { AssignMachineDto } from '../../knitting/dto/knitting-run.dto';
 import { Type } from 'class-transformer';
 import { ArrayMaxSize, ArrayMinSize, IsArray, IsDateString, IsEnum, IsIn, IsInt, IsNotEmpty, IsNumber, IsOptional, IsString, IsUUID, MaxLength, Min, ValidateIf, ValidateNested } from 'class-validator';
 
@@ -34,7 +35,6 @@ export class StartStockProcessDto {
 /** Knitting details that can still be corrected while the batch is knitting. */
 export class KnittingDetailsDto {
   @IsDateString() startDate!: string;
-  @IsOptional() @IsDateString() expectedFinishDate?: string;
   /** Optional for outside-mill work: the selected mill is also the responsible party. */
   @IsOptional() @IsString() @MaxLength(200) partyDetails?: string;
   @IsString() @IsNotEmpty({ message: 'Mill is required' }) @MaxLength(200) millDetails!: string;
@@ -49,6 +49,8 @@ export class KnittingDetailsDto {
  * With several types each takes its yarn KG, except one that may leave it out to take the rest.
  */
 export class KnittingFabricDto {
+  /** Own mill: machines that start this fabric immediately, in the same transaction. */
+  @IsOptional() @IsArray() @ArrayMinSize(1) @ArrayMaxSize(50) @ValidateNested({ each: true }) @Type(() => AssignMachineDto) machines?: AssignMachineDto[];
   @IsString() @IsNotEmpty({ message: 'Enter the fabric type of every type' }) @MaxLength(120) fabricType!: string;
   @IsString() @IsNotEmpty({ message: 'Enter the diameter of every type' }) @MaxLength(40) fabricDiameter!: string;
   @IsOptional() @IsString() @MaxLength(20) fabricGsm?: string;
@@ -64,6 +66,9 @@ export class KnittingFabricDto {
  */
 export class StartKnittingDto extends KnittingDetailsDto {
   @IsEnum(KnittingMillType) millType!: KnittingMillType;
+  @IsOptional() @IsEnum(KnittingShift) startShift?: KnittingShift;
+  /** Single-fabric callers can supply machines here instead of on fabrics[0]. */
+  @IsOptional() @IsArray() @ArrayMinSize(1) @ArrayMaxSize(50) @ValidateNested({ each: true }) @Type(() => AssignMachineDto) machines?: AssignMachineDto[];
   /** The fabric types to knit, each its own batch; the single type below when left out. */
   @IsOptional() @IsArray() @ArrayMinSize(1) @ArrayMaxSize(10) @ValidateNested({ each: true }) @Type(() => KnittingFabricDto) fabrics?: KnittingFabricDto[];
   @ValidateIf((o: StartKnittingDto) => !o.fabrics?.length) @IsString() @IsNotEmpty({ message: 'Fabric type is required' }) @MaxLength(120) fabricType!: string;
@@ -80,8 +85,39 @@ export class StartKnittingDto extends KnittingDetailsDto {
   @IsOptional() @IsNumber({ maxDecimalPlaces: 3 }) @Min(0.001) plannedFabricKg?: number;
 }
 
+/** Details collected while knitting finishes, to start dyeing in the same transaction. */
+export class DyeingHandoffDto {
+  @IsDateString() startDate!: string;
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 3 }) @Min(0.001) fabricReceivedKg?: number;
+  @IsOptional() @IsString() @MaxLength(80) color?: string;
+  @IsOptional() @IsArray() @ArrayMinSize(1) @ArrayMaxSize(20) @ValidateNested({ each: true }) @Type(() => DyeingLotLineDto) lots?: DyeingLotLineDto[];
+  @IsOptional() @IsString() @MaxLength(1000) notes?: string;
+}
+
+/** Details collected while dyeing finishes, to start compacting in the same transaction. */
+export class CompactingHandoffDto {
+  @IsDateString() startDate!: string;
+  @IsNumber({ maxDecimalPlaces: 3 }) @Min(0.001) receivedKg!: number;
+  @IsOptional() @IsString() @MaxLength(80) inwardNo?: string;
+  @IsOptional() @IsString() @MaxLength(1000) notes?: string;
+}
+
+/** An own-mill machine still knitting the batch, stopped as knitting finishes: what it knitted since its last entry. */
+export class MachineStopDto {
+  @IsUUID() runId!: string;
+  /** The finish day's production on this machine; left out when it is already entered on the Machines page. */
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 3 }) @Min(0.001) outputKg?: number;
+  @IsOptional() @IsInt() @Min(0) rollCount?: number;
+}
+
 /** Knitting done: the rolls and total weight that go on to dyeing. */
 export class FinishKnittingDto {
+  /** Own mill: the machines still knitting the batch, stopped in the same transaction. */
+  @IsOptional() @IsArray() @ArrayMaxSize(50) @ValidateNested({ each: true }) @Type(() => MachineStopDto) machineStops?: MachineStopDto[];
+  /** With `machineStops`: the shift the machines stopped in, and the warehouse their grey fabric goes into. */
+  @ValidateIf((d: FinishKnittingDto) => !!d.machineStops?.length) @IsEnum(KnittingShift) stopShift?: KnittingShift;
+  @ValidateIf((d: FinishKnittingDto) => !!d.machineStops?.some((s) => s.outputKg !== undefined)) @IsUUID(undefined, { message: 'Choose the warehouse the grey fabric goes into' }) stopWarehouseId?: string;
+  @IsOptional() @ValidateNested() @Type(() => DyeingHandoffDto) dyeingStart?: DyeingHandoffDto;
   @IsDateString() finishedDate!: string;
   @IsInt() @Min(1) rollCount!: number;
   @IsNumber({ maxDecimalPlaces: 3 }) @Min(0.001) totalWeightKg!: number;
@@ -127,6 +163,7 @@ export class StartCompactingDto {
 
 /** Completes dyeing (or corrects it): output, delivery to compacting or a warehouse. `dyeingDate` is when it started. */
 export class UpdateFabricDyeingDto {
+  @IsOptional() @ValidateNested() @Type(() => CompactingHandoffDto) compactingStart?: CompactingHandoffDto;
   @IsDateString() dyeingDate!: string;
   /** When dyeing was completed; the start date when left out. */
   @IsOptional() @IsDateString() finishedDate?: string;

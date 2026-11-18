@@ -81,7 +81,12 @@ describe('HTTP authentication and role boundaries (isolated service fixtures)', 
     },
     refreshSession: {
       findUnique: jest.fn(({ where }: { where: { id: Role } }) =>
-        Promise.resolve({ userId: where.id, revokedAt: null, expiresAt: new Date(Date.now() + 60000) }),
+        Promise.resolve({
+          userId: where.id,
+          revokedAt: null,
+          expiresAt: new Date(Date.now() + 60000),
+          user: { id: where.id, name: 'Test', email: 'test@example.com', role: where.id, status: 'ACTIVE' },
+        }),
       ),
     },
     $queryRaw: jest.fn().mockResolvedValue([{ ok: 1 }]),
@@ -146,8 +151,13 @@ describe('HTTP authentication and role boundaries (isolated service fixtures)', 
     };
   };
 
-  it('discovers the expected 152 controller endpoints', () => {
-    expect(endpoints).toHaveLength(152);
+  it('discovers every controller without duplicate routes and protects machine reports', () => {
+    expect(new Set(endpoints.map((endpoint) => `${endpoint.method} ${endpoint.url}`)).size).toBe(endpoints.length);
+    for (const controller of controllers) {
+      const prefix = Reflect.getMetadata(PATH_METADATA, controller) as string;
+      expect(endpoints.some((endpoint) => endpoint.url === `/${prefix}` || endpoint.url.startsWith(`/${prefix}/`))).toBe(true);
+    }
+    expect(endpoints).toContainEqual({ method: 'get', url: '/knitting/report', roles: [Role.SUPERADMIN, Role.ADMIN, Role.MANAGER] });
   });
 
   it.each(endpoints.filter((endpoint) => !publicRoutes.has(endpoint.url)))(

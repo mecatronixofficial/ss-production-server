@@ -29,7 +29,7 @@ ALLOW_DESTRUCTIVE_SEED=true bun run prisma:seed
 
 | Script | Purpose |
 | --- | --- |
-| `start:dev` | Watch mode |
+| `start` / `start:dev` | Generate the Prisma client, then start the app (watch mode with `start:dev`) |
 | `build` | `prisma generate` + **`prisma migrate deploy`** + compile. Used by deployment; it migrates whatever `DATABASE_URL` points to |
 | `build:app` | Generate + compile only, without touching the database |
 | `start:prod` | Run `dist/main.js` |
@@ -37,6 +37,8 @@ ALLOW_DESTRUCTIVE_SEED=true bun run prisma:seed
 | `test` / `test:cov` | Jest unit tests |
 | `prisma:status` | Show pending migrations |
 | `create:superadmin` | Create or reset the SUPERADMIN account; safe on production data |
+
+If TypeScript reports missing Prisma models, fields, or enum values after pulling schema changes, stop the running backend and run `bun run prisma:generate`, then restart it. On Windows, a running backend can lock `query_engine-windows.dll.node` and cause generation to fail with `EPERM`; stop every backend instance using this project before generating. Client generation does not apply database migrations; use `bun run prisma:deploy` separately when migrations are required.
 
 ## Project layout
 
