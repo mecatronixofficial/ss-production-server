@@ -142,12 +142,11 @@ export class PurchaseReceiptItemDto {
   @Min(0.001)
   dcQuantity?: number;
 
-  /** Bags / rolls as written, e.g. 12 or 30+9. */
-  @IsOptional()
-  @IsString()
+  /** Bags / rolls as written, e.g. 12 or 30+9. Required: the received note prints it as "No. of Roll / Bag". */
+  @IsString({ message: 'Enter the number of rolls / bags for every line received' })
   @MaxLength(40)
-  @Matches(PACKAGES_PATTERN, { message: 'Write bags / rolls as numbers, e.g. 12 or 30+9' })
-  packages?: string;
+  @Matches(PACKAGES_PATTERN, { message: 'Enter the number of rolls / bags as numbers, e.g. 12 or 30+9' })
+  packages!: string;
 
   /** The count, shade or anything noted for the line. */
   @IsOptional()

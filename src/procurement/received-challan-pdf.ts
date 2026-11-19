@@ -37,7 +37,11 @@ export function receivedChallanPdf(challan: ReceivedChallan): Promise<Buffer> {
   ];
   const balance = challan.lines.filter((l) => l.balance > 0.0005);
   if (balance.length) totals.push(['Still to come on the PO', unitTotals(balance.map((l) => ({ unit: l.unit, value: l.balance })))]);
-  if (prices) totals.push(['Value received', pdfMoney(challan.total ?? 0)]);
+  if (prices) {
+    totals.push(['Taxable value', pdfMoney(challan.subtotal ?? 0)]);
+    totals.push(['GST', pdfMoney(challan.gstAmount ?? 0)]);
+    totals.push(['Total with GST', pdfMoney(challan.total ?? 0)]);
+  }
 
   return renderChallanPdf({
     title: 'Material Received Challan',
@@ -54,16 +58,18 @@ export function receivedChallanPdf(challan: ReceivedChallan): Promise<Buffer> {
     ],
     columns: [
       { label: '#', weight: 3 },
-      { label: 'Item', weight: prices ? 19 : 26 },
-      { label: 'Code', weight: prices ? 15 : 17 },
-      { label: 'Ordered', weight: 11, align: 'right' },
-      { label: 'Earlier', weight: 10, align: 'right' },
-      { label: 'Received now', weight: 11, align: 'right' },
-      { label: 'Balance', weight: 10, align: 'right' },
+      { label: 'Item', weight: prices ? 15 : 26 },
+      { label: 'Code', weight: prices ? 11 : 17 },
+      { label: 'Ordered', weight: prices ? 9 : 11, align: 'right' },
+      { label: 'Earlier', weight: prices ? 8 : 10, align: 'right' },
+      { label: 'Received now', weight: prices ? 9 : 11, align: 'right' },
+      { label: 'Balance', weight: prices ? 8 : 10, align: 'right' },
       ...(prices
         ? [
-            { label: 'Rate', weight: 9, align: 'right' as const },
-            { label: 'Amount', weight: 12, align: 'right' as const },
+            { label: 'Rate', weight: 7, align: 'right' as const },
+            { label: 'Amount', weight: 10, align: 'right' as const },
+            { label: 'GST', weight: 9, align: 'right' as const },
+            { label: 'Total', weight: 11, align: 'right' as const },
           ]
         : []),
     ],
@@ -76,7 +82,9 @@ export function receivedChallanPdf(challan: ReceivedChallan): Promise<Buffer> {
         pdfQuantity(line.receivedBefore, line.unit, true),
         pdfQuantity(line.quantity, line.unit, true),
         line.balance > 0.0005 ? pdfQuantity(line.balance, line.unit, true) : 'Complete',
-        ...(prices ? [pdfMoney(line.rate ?? 0), pdfMoney(line.amount ?? 0)] : []),
+        ...(prices
+          ? [pdfMoney(line.rate ?? 0), pdfMoney(line.amount ?? 0), `${line.gstRate ?? 0}%\n${pdfMoney(line.gstAmount ?? 0)}`, pdfMoney(line.totalAmount ?? 0)]
+          : []),
       ],
       // Full details under the item (the lot is printed with the references above).
       sub: [pdfWords(line.category), specsText(lineSpecs(line.specs, line.itemCode ?? ''))].filter(Boolean).join('\n'),

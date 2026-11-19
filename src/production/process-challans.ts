@@ -149,7 +149,7 @@ export class ProcessChallansService {
     if (!challan) throw new NotFoundException('Challan not found');
     const [company, specs, issuer] = await Promise.all([
       this.prisma.systemSetting.findUnique({ where: { key: 'company' } }),
-      itemSpecs(this.prisma, [challan.flow.flowNo]),
+      itemSpecs(this.prisma, [challan.flow.flowNo, challan.flow.yarnItemCode]),
       challan.createdById ? this.prisma.user.findUnique({ where: { id: challan.createdById }, select: { name: true } }) : null,
     ]);
     const companyInfo = (company?.value ?? {}) as Record<string, string>;
@@ -163,6 +163,9 @@ export class ProcessChallansService {
       fromDetails,
       toDetails,
       specs: specs.get(challan.flow.flowNo) ?? [],
+      /** The spinning mill of the batch's yarn (yarn register "Mill", or the PO item's "Mill / brand"), for the delivery note. */
+      yarnMill:
+        (challan.flow.yarnItemCode && specs.get(challan.flow.yarnItemCode)?.find((s) => s.label === 'Mill' || s.label === 'Mill / brand')?.value) || null,
       issuedBy: issuer?.name ?? null,
       company: companyInfo,
     };
