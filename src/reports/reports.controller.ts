@@ -1,13 +1,16 @@
 import { BadRequestException, Controller, Get, Param, Query, Res, StreamableFile, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { Role } from '@prisma/client';
-import { IsDateString, IsOptional } from 'class-validator';
+import { IsDateString, IsOptional, IsUUID, Matches } from 'class-validator';
 import { Response } from 'express';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { ReportsService } from './reports.service';
 
 class ReportRangeDto {
+  /** Daily machine report: the production day's date, including its following night. */
+  @IsOptional() @IsDateString() @Matches(/^\d{4}-\d{2}-\d{2}$/) day?: string;
+  @IsOptional() @IsUUID() machineId?: string;
   /** Inclusive start (ISO timestamp; the client sends local start-of-day). */
   @IsOptional() @IsDateString() from?: string;
   /** Exclusive end. */
@@ -15,7 +18,7 @@ class ReportRangeDto {
 }
 
 const toRange = (q: ReportRangeDto) => {
-  const range = { from: q.from ? new Date(q.from) : undefined, to: q.to ? new Date(q.to) : undefined };
+  const range = { from: q.from ? new Date(q.from) : undefined, to: q.to ? new Date(q.to) : undefined, day: q.day, machineId: q.machineId };
   if (range.from && range.to && range.from >= range.to) throw new BadRequestException('The start date must be before the end date');
   return range;
 };

@@ -1,4 +1,5 @@
 import { ColumnType, ReportColumn, ReportResult } from './report-types';
+import { machineShiftPdf } from './machine-shift-pdf';
 
 // ExcelJS and PDFKit are large and only needed for exports, so they load on the first one instead of at server start.
 
@@ -114,7 +115,10 @@ export async function toExcel(report: ReportResult) {
   });
   header.height = 30;
 
-  for (const row of report.rows) ws.addRow(report.columns.map((c) => excelValue(row[c.key], c, tz)));
+  for (const row of report.rows) {
+    const added=ws.addRow(report.columns.map((c) => excelValue(row[c.key], c, tz)));
+    if(report.key==='machine-daily-shifts')added.eachCell(cell=>{cell.alignment={vertical:'top',wrapText:true};});
+  }
 
   if (report.columns.some((c) => c.total)) {
     const totals = ws.addRow(
@@ -134,6 +138,7 @@ export async function toExcel(report: ReportResult) {
   report.columns.forEach((c, i) => {
     const column = ws.getColumn(i + 1);
     column.width = EXCEL_WIDTH[c.type];
+    if(report.key==='machine-daily-shifts'&&['dayWork','nightWork','started','stopped'].includes(c.key))column.width=48;
     if (EXCEL_FORMAT[c.type]) column.numFmt = EXCEL_FORMAT[c.type]!;
   });
   ws.autoFilter = { from: { row: 6, column: 1 }, to: { row: 6, column: report.columns.length } };
@@ -165,6 +170,7 @@ const PDF_MAX_COLUMN = 170;
 const PDF_CELL_PADDING = 8;
 
 export async function toPdf(report: ReportResult) {
+  if(report.key==='machine-daily-shifts')return machineShiftPdf(report);
   const { default: PDFDocument } = await import('pdfkit');
   const tz = report.company.timezone;
   const doc = new PDFDocument({

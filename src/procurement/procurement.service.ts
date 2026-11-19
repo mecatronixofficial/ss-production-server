@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { businessDate } from '../common/business-date';
 import { Prisma, PurchaseOrderStatus, Role } from '@prisma/client';
 import { AuthUser } from '../common/auth-user';
 import { batchCode, documentNo } from '../common/numbering';
@@ -101,7 +102,7 @@ export class ProcurementService {
   async list(user: AuthUser) {
     const rows = await this.prisma.purchaseOrder.findMany({
       include: purchaseOrderInclude,
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ orderDate: 'desc' }, { createdAt: 'desc' }],
       take: 1000,
     });
     return this.present(rows, user);
@@ -330,6 +331,7 @@ export class ProcurementService {
   }
 
   async create(dto: CreatePurchaseOrderDto, user: AuthUser) {
+    const orderDate = businessDate(dto.orderDate, 'Purchase date');
     const fractionalGrams = dto.items.find((item) => purchaseUnit(item.unit) === 'G' && !Number.isInteger(item.quantity));
     if (fractionalGrams) throw new BadRequestException(`${fractionalGrams.itemName}: grams are whole numbers`);
     const warehouse = await this.prisma.warehouse.findFirst({ where: { id: dto.warehouseId, active: true } });
@@ -339,7 +341,8 @@ export class ProcurementService {
       const supplier = await resolvePurchaseSupplier(tx, dto);
       const purchaseOrder = await tx.purchaseOrder.create({
         data: {
-          poNo: await documentNo(tx, 'PUR'),
+          poNo: await documentNo(tx, 'PUR', orderDate),
+          orderDate,
           supplierId: supplier.id,
           warehouseId: warehouse.id,
           expectedDate: dto.expectedDate ? new Date(dto.expectedDate) : undefined,
@@ -366,7 +369,7 @@ export class ProcurementService {
           module: 'procurement',
           entity: 'PurchaseOrder',
           entityId: purchaseOrder.id,
-          newValue: { poNo: purchaseOrder.poNo, supplierId: supplier.id, warehouseId: warehouse.id, itemCount: dto.items.length },
+          newValue: { poNo: purchaseOrder.poNo, orderDate: orderDate.toISOString(), supplierId: supplier.id, warehouseId: warehouse.id, itemCount: dto.items.length },
         },
       });
       const ordered = linesText(
@@ -415,6 +418,7 @@ export class ProcurementService {
         },
       });
       if (!purchaseOrder) throw new NotFoundException('Purchase order not found');
+      const receivedAt = businessDate(dto.receivedDate, 'Receipt date', purchaseOrder.orderDate);
       if (!OPEN_STATUSES.includes(purchaseOrder.status)) {
         throw new BadRequestException(
           `A ${purchaseOrder.status.toLowerCase().replaceAll('_', ' ')} purchase order cannot receive material`,
@@ -452,7 +456,8 @@ export class ProcurementService {
 
       const receipt = await tx.purchaseReceipt.create({
         data: {
-          receiptNo: await documentNo(tx, 'GRN'),
+          receiptNo: await documentNo(tx, 'GRN', receivedAt),
+          receivedAt,
           purchaseOrderId: purchaseOrder.id,
           warehouseId: warehouse.id,
           // The receipt's headline category; a mixed receipt keeps each line's own category in its stock movement.
@@ -484,7 +489,7 @@ export class ProcurementService {
         // later receipts of the same line add to that code.
         let itemCode = item.itemCode;
         if (!itemCode) {
-          itemCode = await batchCode(tx);
+          itemCode = await batchCode(tx, receivedAt);
           await tx.purchaseOrderItem.update({ where: { id: item.id }, data: { itemCode } });
         }
         codes.push({ itemName: item.itemName, itemCode, isNew: itemCode !== item.itemCode });
@@ -502,6 +507,7 @@ export class ProcurementService {
             unit: stocked.unit,
             referenceType: 'PURCHASE_RECEIPT',
             referenceId: receipt.id,
+            createdAt: receivedAt,
             createdById: user.id,
             notes: [
               `${purchaseOrder.poNo} / ${receipt.receiptNo}${challanNo ? ` / challan ${challanNo}` : ''}`,

@@ -136,6 +136,12 @@ export class ProductionController {
     return this.service.receiveFabric(deliveryId, dto, user);
   }
 
+  /** Deletes a batch that has not got going; its yarn goes back into stock. */
+  @Delete('fabric-flows/:id')
+  deleteBatch(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthUser) {
+    return this.service.deleteBatch(id, user);
+  }
+
   @Delete('fabric-flows/:id/deliveries/:deliveryId')
   deleteDelivery(@Param('id', ParseUUIDPipe) id: string, @Param('deliveryId', ParseUUIDPipe) deliveryId: string, @CurrentUser() user: AuthUser) {
     return this.service.deleteDelivery(id, deliveryId, user);

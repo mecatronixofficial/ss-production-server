@@ -70,6 +70,12 @@ describe('Completing an own-mill knitting task on the Machines page', () => {
 });
 
 describe('Returning unused yarn', () => {
+  it('puts unused yarn back on the selected finish date', async () => {
+    const inventory = { createTxn: jest.fn().mockResolvedValue({id:'returned'}), removeInWithin: jest.fn() };
+    const tx = { stockTransaction:{findUniqueOrThrow:jest.fn().mockResolvedValue({category:'YARN',itemCode:'01SS26',itemName:'Cotton',lotNo:null,warehouseId:'warehouse',unit:'KG'})},fabricProductionFlow:{update:jest.fn()} } as unknown as Prisma.TransactionClient;
+    await returnUnusedYarn(tx,inventory as unknown as InventoryService,{id:'kt',flowNo:'KT',yarnIssueTxnId:'issue',yarnReturnTxnId:null},50,'admin',new Date('2026-07-10'));
+    expect(inventory.createTxn).toHaveBeenCalledWith(expect.objectContaining({quantityIn:50,createdAt:new Date('2026-07-10')}),tx);
+  });
   it('does nothing when all of it was used and nothing went back before', async () => {
     const inventory = { createTxn: jest.fn(), removeInWithin: jest.fn() };
     const tx = { fabricProductionFlow: { update: jest.fn() } } as unknown as Prisma.TransactionClient;
