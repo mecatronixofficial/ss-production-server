@@ -10,7 +10,7 @@ type Flow = { id: string; flowNo: string; yarnIssueTxnId: string | null; yarnRet
  * refused once that yarn has been issued again. A leftover of 0 only takes back an earlier return. Used when
  * knitting finishes on the Production page and when an own-mill task is completed on the Machines page.
  */
-export async function returnUnusedYarn(tx: Prisma.TransactionClient, inventory: InventoryService, flow: Flow, leftoverKg: number, actorId?: string | null) {
+export async function returnUnusedYarn(tx: Prisma.TransactionClient, inventory: InventoryService, flow: Flow, leftoverKg: number, actorId?: string | null, entryAt?: Date) {
   if (flow.yarnReturnTxnId) {
     await inventory.removeInWithin(tx, flow.yarnReturnTxnId, actorId ?? null);
     await tx.fabricProductionFlow.update({ where: { id: flow.id }, data: { yarnReturnTxnId: null } });
@@ -31,6 +31,7 @@ export async function returnUnusedYarn(tx: Prisma.TransactionClient, inventory: 
       referenceId: flow.id,
       createdById: actorId ?? undefined,
       notes: `${flow.flowNo} yarn not used in knitting`,
+      ...(entryAt ? { createdAt: entryAt } : {}),
     },
     tx,
   );
@@ -79,7 +80,7 @@ export function poolFigures(self: PoolFlow, group: PoolFlow[]) {
  * types sharing one yarn take theirs from what the finished ones left, and the rest goes back when the last finishes.
  * Answers the yarn used to record (its share again when opened).
  */
-export async function settleYarnUsed(tx: Prisma.TransactionClient, inventory: InventoryService, flow: PoolFlow, usedKg: number | null, actorId?: string | null) {
+export async function settleYarnUsed(tx: Prisma.TransactionClient, inventory: InventoryService, flow: PoolFlow, usedKg: number | null, actorId?: string | null, entryAt?: Date) {
   const group = flow.yarnIssueTxnId ? await tx.fabricProductionFlow.findMany({ where: { yarnIssueTxnId: flow.yarnIssueTxnId }, select: poolSelect }) : [flow];
   const self = group.find((g) => g.id === flow.id) ?? flow;
   const pool = poolFigures(self, group);
@@ -90,7 +91,7 @@ export async function settleYarnUsed(tx: Prisma.TransactionClient, inventory: In
       return given;
     }
     if (usedKg > given + 0.0005) throw new BadRequestException(`Only ${given.toFixed(3)} KG of yarn was given to ${self.flowNo}`);
-    await returnUnusedYarn(tx, inventory, self, given - usedKg, actorId);
+    await returnUnusedYarn(tx, inventory, self, given - usedKg, actorId, entryAt);
     return usedKg;
   }
   // The shared yarn's return is worked out again from all of them, so any earlier one is taken back first.
@@ -99,6 +100,6 @@ export async function settleYarnUsed(tx: Prisma.TransactionClient, inventory: In
   if (usedKg > pool.leftForThisKg + 0.0005) {
     throw new BadRequestException(`Only ${pool.leftForThisKg.toFixed(3)} KG of the yarn shared with ${pool.sharedWith.join(', ')} is left for ${self.flowNo}`);
   }
-  if (pool.othersOpen === 0) await returnUnusedYarn(tx, inventory, { ...self, yarnReturnTxnId: null }, pool.leftForThisKg - usedKg, actorId);
+  if (pool.othersOpen === 0) await returnUnusedYarn(tx, inventory, { ...self, yarnReturnTxnId: null }, pool.leftForThisKg - usedKg, actorId, entryAt);
   return usedKg;
 }

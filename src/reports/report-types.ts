@@ -15,7 +15,7 @@ export type ReportRow = Record<string, string | number | null>;
 
 export type ReportGroup = 'Overview' | 'Sales' | 'Production' | 'Purchases' | 'Inventory' | 'Machines' | 'Finance';
 
-export type DateRange = { from?: Date; to?: Date };
+export type DateRange = { from?: Date; to?: Date; day?: string; machineId?: string };
 
 export type ReportBody = {
   columns: ReportColumn[];
@@ -42,6 +42,7 @@ export type ReportContext = { timezone: string; now: Date };
 export type ReportTop = { label: string; value: string };
 
 export type ReportResult = ReportBody & {
+  machineId?: string | null;
   key: string;
   title: string;
   group: ReportGroup;

@@ -70,6 +70,10 @@ export class PurchaseOrderItemDto {
 }
 
 export class CreatePurchaseOrderDto {
+  /** Actual purchase date, including backdated entries. Omitted by older clients to use today. */
+  @IsOptional()
+  @IsDateString()
+  orderDate?: string;
   @IsOptional()
   @IsString()
   @IsNotEmpty()
@@ -161,6 +165,10 @@ export class PurchaseReceiptItemDto {
 }
 
 export class ReceivePurchaseOrderDto {
+  /** When material arrived, used by the receipt and its stock movements. */
+  @IsOptional()
+  @IsDateString()
+  receivedDate?: string;
   @IsUUID()
   warehouseId!: string;
 

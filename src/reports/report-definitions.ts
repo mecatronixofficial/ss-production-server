@@ -1,4 +1,5 @@
 import { stockQuantity } from '../common/units';
+import { machineShiftDefinition } from './machine-shift-report';
 import { MoneyService } from '../finance/money.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -54,6 +55,7 @@ function topBy(rows: ReportRow[], labelKey: string, valueKey: string, n: number)
 
 export function reportDefinitions(prisma: PrismaService, money: MoneyService): ReportDefinition[] {
   return [
+    machineShiftDefinition(prisma),
     // ───────────────────────────── Overview ─────────────────────────────
     {
       key: 'monthly-summary',

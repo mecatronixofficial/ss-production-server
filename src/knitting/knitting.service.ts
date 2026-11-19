@@ -436,7 +436,7 @@ export class KnittingService {
     // complete); reopening takes that back again.
     let yarnUsed: number | undefined;
     if (complete && opts.yarnUsedKg !== undefined && flow.yarnIssueTxnId) {
-      yarnUsed = await settleYarnUsed(tx, this.inventory, flow, opts.yarnUsedKg, opts.actorId);
+      yarnUsed = await settleYarnUsed(tx, this.inventory, flow, opts.yarnUsedKg, opts.actorId, lastFinished ?? undefined);
     } else if (!complete && flow.knittingFinishedAt && flow.yarnIssueTxnId) {
       yarnUsed = await settleYarnUsed(tx, this.inventory, flow, null, opts.actorId);
     }
@@ -776,6 +776,26 @@ export class KnittingService {
         data: { actorId: user.id, action: 'KNITTING_RUN_REOPENED', module: 'knitting', entity: 'KnittingRun', entityId: id, previousValue: { runNo: run.runNo, outputKg: num(run.outputKg) } },
       });
       return this.view(tx, id);
+    });
+  }
+
+  /**
+   * For deleting a Production task that never got going: removes its machine runs, inside the caller's transaction,
+   * and frees their machines. Refuses when any run is finished or has days of production recorded.
+   */
+  async cancelTaskRunsWithin(tx: Prisma.TransactionClient, flowId: string, user: AuthUser) {
+    const runs = await tx.knittingRun.findMany({ where: { productionFlowId: flowId }, include: { machine: { select: { id: true, code: true, status: true } }, _count: { select: { days: true } } } });
+    if (!runs.length) return;
+    await lockKeys(tx, ...runs.map((run) => `knitting-run:${run.id}`));
+    for (const run of runs) {
+      if (run.status !== 'RUNNING') throw new BadRequestException(`${run.runNo} on ${run.machine.code} is finished; this batch can't be deleted`);
+      if (run._count.days) throw new BadRequestException(`${run.runNo} on ${run.machine.code} has production recorded; this batch can't be deleted`);
+    }
+    await tx.knittingRun.deleteMany({ where: { id: { in: runs.map((run) => run.id) } } });
+    const busy = runs.filter((run) => run.machine.status === MachineStatus.RUNNING).map((run) => run.machine.id);
+    if (busy.length) await tx.machine.updateMany({ where: { id: { in: busy } }, data: { status: MachineStatus.IDLE } });
+    await tx.auditLog.createMany({
+      data: runs.map((run) => ({ actorId: user.id, action: 'KNITTING_RUN_CANCELLED', module: 'knitting', entity: 'KnittingRun', entityId: run.id, previousValue: { runNo: run.runNo, machine: run.machine.code, reason: 'Production batch deleted' } })),
     });
   }
 

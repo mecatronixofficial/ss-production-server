@@ -3,6 +3,7 @@ import { Prisma, StockCategory, StockTransaction, StockTxnType } from '@prisma/c
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../common/auth-user';
 import { batchCode, documentNo } from '../common/numbering';
+import { businessDate } from '../common/business-date';
 import { lockKeys } from '../common/locks';
 import { ENTRY_TYPES, GODOWN_CATEGORIES, GodownEntryDto } from './dto/godown-entry.dto';
 import { GODOWN_ENTRY } from './constants';
@@ -398,7 +399,7 @@ export class InventoryService {
     let itemCode = dto.itemCode;
     if (!itemCode && !current && dto.category === 'YARN' && (dto.txnType === 'PURCHASE_IN' || dto.txnType === 'OPENING')) {
       // Yarn received into a warehouse gets its own code (01SS26…), followed through knitting, dyeing and delivery.
-      itemCode = await batchCode(this.prisma);
+      itemCode = await batchCode(this.prisma, businessDate(dto.entryDate, 'Stock entry date'));
     } else if (!itemCode) {
       // Reuse the code of an item already in the godown so its stock stays in one row.
       const existing = await this.prisma.stockTransaction.findFirst({
@@ -419,7 +420,7 @@ export class InventoryService {
       quantityIn: dto.direction === 'IN' ? dto.quantityKg : 0,
       quantityOut: dto.direction === 'OUT' ? dto.quantityKg : 0,
       notes: dto.notes || null,
-      ...(dto.entryDate ? { createdAt: new Date(dto.entryDate) } : {}),
+      ...(dto.entryDate ? { createdAt: businessDate(dto.entryDate, 'Stock entry date') } : {}),
     };
   }
 
@@ -461,7 +462,7 @@ export class InventoryService {
     const data = await this.entryData(dto);
     return this.guardedChange([keyOf(data)], async (tx) => {
       const txn = await tx.stockTransaction.create({
-        data: { ...data, referenceType: GODOWN_ENTRY, referenceId: await documentNo(tx, 'GD'), createdById: user.id },
+        data: { ...data, referenceType: GODOWN_ENTRY, referenceId: await documentNo(tx, 'GD', data.createdAt), createdById: user.id },
       });
       await this.bills.autoIssue(tx, txn);
       await this.audit(tx, user.id, 'STOCK_ENTRY_CREATED', txn, null);

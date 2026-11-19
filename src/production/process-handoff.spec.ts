@@ -10,6 +10,7 @@ import { FinishKnittingDto, UpdateFabricDyeingDto } from './dto/fabric-flow.dto'
 import { issueChallan } from './process-challans';
 
 jest.mock('./process-notify', () => ({ notifyProcessDone: jest.fn() }));
+jest.mock('../notifications/notify.util', () => ({ notifyRoles: jest.fn() }));
 jest.mock('./process-challans', () => ({ issueChallan: jest.fn().mockResolvedValue({ id: 'challan' }), hasChallan: jest.fn().mockResolvedValue(true), cancelChallan: jest.fn(), issueWarehouseName: jest.fn().mockResolvedValue(null) }));
 
 const user: AuthUser = { id: 'admin', name: 'Admin', email: 'admin@example.test', role: 'ADMIN' };
@@ -38,7 +39,13 @@ const setup = (overrides: Record<string, unknown> = {}) => {
       aggregate: jest.fn().mockImplementation(({ where }: { where: { parentId: string } }) => Promise.resolve({ _sum: { purchasedWeightKg: [...rows.values()].filter(row => row.parentId === where.parentId).reduce((sum, row) => sum + Number(row.purchasedWeightKg), 0) } })),
     },
     fabricFlowExpense: { findMany: jest.fn().mockResolvedValue([]) },
-    fabricFlowDelivery: { findFirst: jest.fn().mockResolvedValue(null) },
+    fabricFlowDelivery: {
+      findFirst: jest.fn().mockResolvedValue(null),
+      create: jest.fn().mockImplementation(({ data }: { data: object }) => Promise.resolve({ id: 'delivery', receivedAt: null, ...data })),
+      findUnique: jest.fn().mockResolvedValue({ flowId: 'lot-1' }),
+      findUniqueOrThrow: jest.fn(), update: jest.fn().mockResolvedValue({}),
+    },
+    warehouse: { findFirst: jest.fn().mockResolvedValue({ id: 'warehouse', code: 'WH', name: 'Store', active: true }) },
     knittingRun: { findMany: jest.fn().mockResolvedValue([]) },
     stockTransaction: { groupBy: jest.fn().mockResolvedValue([]) },
     auditLog: { create: jest.fn() },
@@ -47,7 +54,7 @@ const setup = (overrides: Record<string, unknown> = {}) => {
     const before = new Map([...rows.entries()].map(([id, row]) => [id, { ...row }]));
     try { return await work(tx); } catch (error) { rows.clear(); for (const [id, row] of before) rows.set(id, row); throw error; }
   }) };
-  const inventory = { issueWithin: jest.fn().mockResolvedValue({ id: 'issue' }) };
+  const inventory = { issueWithin: jest.fn().mockResolvedValue({ id: 'issue' }), createTxn: jest.fn().mockResolvedValue({ id: 'stock' }) };
   const machines = { stopTaskRunsWithin: jest.fn().mockResolvedValue(undefined) };
   const service = new ProductionService(db as unknown as PrismaService, inventory as unknown as InventoryService, {} as StorageService, machines as unknown as KnittingService);
   return { service, tx, db, rows, inventory, machines };
@@ -85,7 +92,7 @@ describe('Completing a process and starting the next one in one request', () => 
     tx.knittingRun.findMany.mockImplementation(({ where }: { where: { status?: string } }) => Promise.resolve(where.status === 'RUNNING' ? [] : [{ runNo: 'Y1-KT01-R1' }]));
     tx.stockTransaction.groupBy.mockResolvedValue([{ itemCode: 'Y1-KT01-R1', itemName: 'Grey fabric', warehouseId: 'warehouse', _sum: { quantityIn: 95, quantityOut: 0 } }]);
     await service.finishKnitting('batch', { ...knitting, dyeingStart: { startDate: '2020-01-02', lots: [{ color: 'Navy' }] } }, user);
-    expect(inventory.issueWithin).toHaveBeenCalledWith(tx, expect.objectContaining({ itemCode: 'Y1-KT01-R1', category: 'GREY_FABRIC', quantityOut: 95, txnType: 'DYEING_ISSUE' }));
+    expect(inventory.issueWithin).toHaveBeenCalledWith(tx, expect.objectContaining({ itemCode: 'Y1-KT01-R1', category: 'GREY_FABRIC', quantityOut: 95, txnType: 'DYEING_ISSUE', createdAt: new Date('2020-01-02') }));
   });
 
   it('stops the own-mill machines still knitting the batch in the same transaction as finishing knitting', async () => {
@@ -143,5 +150,30 @@ describe('Completing a process and starting the next one in one request', () => 
     expect(errors.some(error => error.property === 'dyeingStart')).toBe(true);
     const compactingErrors = await validate(plainToInstance(UpdateFabricDyeingDto, { ...dyeing, compactingStart: { startDate: '2020-01-03', receivedKg: -1 } }));
     expect(compactingErrors.some(error => error.property === 'compactingStart')).toBe(true);
+  });
+
+  it('records knitting, dyeing, compacting, delivery and warehouse receipt on 10 July 2026', async () => {
+    const day = '2026-07-10';
+    const selected = new Date(day);
+    const { service, tx, rows, inventory } = setup({ knittingDate: selected });
+    await service.finishKnitting('batch', { ...knitting, finishedDate: day, dyeingStart: { startDate: day, lots: [{color:'Navy'}] } }, user);
+    await service.updateFabricDyeing('lot-1', { ...dyeing, dyeingDate: day, finishedDate: day, compactingStart: {startDate:day,receivedKg:90} }, user);
+    await service.updateFabricCompacting('lot-1', { compactingDate:day,finishedDate:day,compactingPartyDetails:'Compact mill',compactingMillDetails:'Compact mill',compactingReceivedKg:90,officeDeliveryKg:85,compactingExpense:300 }, user);
+    await service.recordDelivery('lot-1', { deliveredDate:day,destination:'WAREHOUSE',warehouseId:'warehouse',weightKg:50 }, user);
+    const deliveryData = tx.fabricFlowDelivery.create.mock.calls[0][0].data;
+    tx.fabricFlowDelivery.findUniqueOrThrow.mockResolvedValue({ id:'delivery',receivedAt:null,...deliveryData,flow:rows.get('lot-1'),warehouse:{code:'WH',active:true} });
+    await service.receiveFabric('delivery',{receivedDate:day,receivedWeightKg:50},user);
+    expect(rows.get('batch')?.knittingFinishedAt).toEqual(selected);
+    expect(rows.get('lot-1')).toMatchObject({dyeingDate:selected,dyeingFinishedAt:selected,compactingDate:selected,compactingFinishedAt:selected,finalDate:selected});
+    expect(deliveryData.deliveredAt).toEqual(selected);
+    expect(inventory.createTxn).toHaveBeenCalledWith(expect.objectContaining({quantityIn:50,createdAt:selected}),tx);
+    expect(tx.fabricFlowDelivery.update).toHaveBeenCalledWith(expect.objectContaining({data:expect.objectContaining({receivedAt:selected})}));
+  });
+
+  it('records unused grey fabric on the selected completion date rather than today', async () => {
+    const day = '2026-07-10';
+    const { service, tx, inventory } = setup({knittingFinishedAt:new Date(day),dyeingDate:new Date(day),dyeingDeliveryKg:95,fabricReceivedKg:95});
+    await service.updateFabricDyeing('batch',{...dyeing,dyeingDate:day,finishedDate:day,fabricReceivedKg:90,dyeingOutputWeightKg:85,balanceKg:5,balanceWarehouseId:'warehouse',compactingStart:{startDate:day,receivedKg:85}},user);
+    expect(inventory.createTxn).toHaveBeenCalledWith(expect.objectContaining({category:'GREY_FABRIC',quantityIn:5,createdAt:new Date(day)}),tx);
   });
 });

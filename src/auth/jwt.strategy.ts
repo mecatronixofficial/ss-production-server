@@ -1,9 +1,9 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { Request } from 'express';
-import { Role } from '@prisma/client';
+import { Prisma, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 const cookieExtractor = (req: Request) => req?.cookies?.access_token ?? null;
@@ -15,6 +15,8 @@ const cookieExtractor = (req: Request) => req?.cookies?.access_token ?? null;
  */
 const SESSION_CACHE_MS = 5_000;
 const SESSION_CACHE_MAX = 1_000;
+const SESSION_RETRY_DELAY_MS = 250;
+const RETRYABLE_CONNECTION_ERRORS = new Set(['P1001', 'P1002', 'P1017']);
 
 const lookupSession = (prisma: PrismaService, sessionId: string) =>
   prisma.refreshSession.findUnique({
@@ -27,11 +29,12 @@ const lookupSession = (prisma: PrismaService, sessionId: string) =>
     },
   });
 
-type SessionLookup = ReturnType<typeof lookupSession>;
+type SessionLookup = Promise<Awaited<ReturnType<typeof lookupSession>>>;
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
-  private readonly sessions = new Map<string, { at: number; lookup: SessionLookup }>();
+  private readonly logger = new Logger(JwtStrategy.name);
+  private readonly sessions = new Map<string, { at: number; pending: boolean; lookup: SessionLookup }>();
 
   constructor(
     config: ConfigService,
@@ -63,14 +66,46 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   private session(sessionId: string) {
     const now = Date.now();
     const cached = this.sessions.get(sessionId);
-    if (cached && now - cached.at < SESSION_CACHE_MS) return cached.lookup;
+    // Keep sharing a slow read (including its retry) until it settles. Expiring
+    // it while pending queues more copies behind the same database outage.
+    if (cached && (cached.pending || now - cached.at < SESSION_CACHE_MS)) return cached.lookup;
     if (this.sessions.size >= SESSION_CACHE_MAX) {
-      for (const [key, entry] of this.sessions) if (now - entry.at >= SESSION_CACHE_MS) this.sessions.delete(key);
+      for (const [key, entry] of this.sessions) if (!entry.pending && now - entry.at >= SESSION_CACHE_MS) this.sessions.delete(key);
+      if (this.sessions.size >= SESSION_CACHE_MAX && !this.sessions.has(sessionId)) {
+        this.sessions.delete(this.sessions.keys().next().value!);
+      }
     }
-    const lookup = lookupSession(this.prisma, sessionId);
-    this.sessions.set(sessionId, { at: now, lookup });
-    // A failed read is not remembered: the next request tries again.
-    lookup.catch(() => this.sessions.get(sessionId)?.lookup === lookup && this.sessions.delete(sessionId));
+    const lookup = this.readSession(sessionId);
+    const entry = { at: now, pending: true, lookup };
+    this.sessions.set(sessionId, entry);
+    void lookup.then(
+      () => {
+        entry.pending = false;
+      },
+      () => {
+        // A failed read is not remembered: the next request tries again.
+        if (this.sessions.get(sessionId) === entry) this.sessions.delete(sessionId);
+      },
+    );
     return lookup;
+  }
+
+  private async readSession(sessionId: string) {
+    try {
+      return await lookupSession(this.prisma, sessionId);
+    } catch (error) {
+      const code =
+        error instanceof Prisma.PrismaClientKnownRequestError
+          ? error.code
+          : error instanceof Prisma.PrismaClientInitializationError
+            ? error.errorCode
+            : undefined;
+      if (!code || !RETRYABLE_CONNECTION_ERRORS.has(code)) throw error;
+      // Only repeat this read. Replaying a production write after a lost
+      // connection could duplicate a change that the database already committed.
+      this.logger.warn(`Session database read failed (${code}); retrying once`);
+      await new Promise((resolve) => setTimeout(resolve, SESSION_RETRY_DELAY_MS));
+      return lookupSession(this.prisma, sessionId);
+    }
   }
 }
