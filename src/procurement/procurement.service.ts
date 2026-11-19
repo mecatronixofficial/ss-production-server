@@ -12,7 +12,10 @@ import { ADMIN_ROLES } from '../common/roles';
 import { InventoryService } from '../inventory/inventory.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreatePurchaseOrderDto, ReceivePurchaseOrderDto } from './dto/procurement.dto';
-import { purchaseMoney } from './purchase-money';
+import { purchaseLineAmounts, purchaseMoney } from './purchase-money';
+
+/** Adds money values in whole paise, so 0.1 + 0.2 never shows as 0.30000000000000004. */
+const paise = <T>(rows: T[], pick: (row: T) => number | null) => rows.reduce((sum, row) => sum + Math.round((pick(row) ?? 0) * 100), 0) / 100;
 import { purchaseParty, resolvePurchaseSupplier } from './purchase-parties';
 import { linesText, MANAGEMENT_ROLES, notifyRoles, settleReminders } from '../notifications/notify.util';
 
@@ -199,7 +202,7 @@ export class ProcurementService {
       where: from || to ? { receivedAt: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } } : undefined,
       include: {
         warehouse: { select: { code: true, name: true } },
-        items: { include: { purchaseOrderItem: { select: { itemName: true, itemCode: true, unit: true, rate: true } } } },
+        items: { include: { purchaseOrderItem: { select: { itemName: true, itemCode: true, unit: true, rate: true, gstRate: true } } } },
         purchaseOrder: { select: { id: true, poNo: true, supplier: { select: { code: true, name: true, millId: true, mill: true } } } },
       },
       orderBy: { receivedAt: 'desc' },
@@ -226,7 +229,8 @@ export class ProcurementService {
         unit: line.purchaseOrderItem.unit,
         quantity: Number(line.quantity),
       })),
-      value: Math.round(r.items.reduce((sum, line) => sum + Number(line.quantity) * Number(line.purchaseOrderItem.rate), 0) * 100) / 100,
+      /** With GST, the same as the challan's total and the purchase entry. */
+      value: paise(r.items, (line) => Number(purchaseLineAmounts({ quantity: line.quantity, rate: line.purchaseOrderItem.rate, gstRate: line.purchaseOrderItem.gstRate }).totalAmount)),
     }));
   }
 
@@ -274,6 +278,8 @@ export class ProcurementService {
           .reduce((sum, r) => sum + Number(r.quantity), 0);
         const quantity = Number(line.quantity);
         const rate = prices ? Number(item.rate) : null;
+        // The same paise rounding as the purchase entry, so a fully received PO's challans add up to its total.
+        const money = prices ? purchaseLineAmounts({ quantity: line.quantity, rate: item.rate, gstRate: item.gstRate }) : null;
         return {
           id: line.id,
           itemName: item.itemName,
@@ -285,7 +291,12 @@ export class ProcurementService {
           quantity,
           balance: Math.max(0, ordered - receivedBefore - quantity),
           rate,
-          amount: rate === null ? null : Math.round(quantity * rate * 100) / 100,
+          /** Taxable value: quantity × rate. */
+          amount: money ? Number(money.subtotal) : null,
+          gstRate: prices ? Number(item.gstRate) : null,
+          gstAmount: money ? Number(money.gstAmount) : null,
+          /** Amount with GST, as on the purchase entry. */
+          totalAmount: money ? Number(money.totalAmount) : null,
           dcQuantity: line.dcQuantity === null ? null : Number(line.dcQuantity),
           packages: line.packages,
           packageCount: line.packageCount,
@@ -324,7 +335,10 @@ export class ProcurementService {
       },
       supplier: purchaseParty(po.supplier),
       lines,
-      total: prices ? lines.reduce((sum, line) => sum + (line.amount ?? 0), 0) : null,
+      // Summed in paise, as the purchase entry is: taxable value, GST, and the total with GST.
+      subtotal: prices ? paise(lines, (line) => line.amount) : null,
+      gstAmount: prices ? paise(lines, (line) => line.gstAmount) : null,
+      total: prices ? paise(lines, (line) => line.totalAmount) : null,
       pricesShown: prices,
       company: (company?.value ?? {}) as Record<string, string>,
     };

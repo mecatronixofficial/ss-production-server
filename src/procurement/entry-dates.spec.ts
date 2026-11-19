@@ -83,7 +83,7 @@ describe('Backdated purchase and goods receipt entries', () => {
     const { service, tx, inventory } = setup();
     await service.receive(
       'po',
-      { warehouseId: 'warehouse', receivedDate: '2026-07-10', items: [{ purchaseOrderItemId: 'line', quantity: 1200 }] },
+      { warehouseId: 'warehouse', receivedDate: '2026-07-10', items: [{ purchaseOrderItemId: 'line', quantity: 1200, packages: '30+9' }] },
       user,
     );
     expect(tx.purchaseReceipt.create).toHaveBeenCalledWith(
@@ -101,7 +101,7 @@ describe('Backdated purchase and goods receipt entries', () => {
     await expect(
       service.receive(
         'po',
-        { warehouseId: 'warehouse', receivedDate: '2026-07-09', items: [{ purchaseOrderItemId: 'line', quantity: 1200 }] },
+        { warehouseId: 'warehouse', receivedDate: '2026-07-09', items: [{ purchaseOrderItemId: 'line', quantity: 1200, packages: '30+9' }] },
         user,
       ),
     ).rejects.toThrow('before');
@@ -119,9 +119,17 @@ describe('Backdated purchase and goods receipt entries', () => {
     const receipt = plainToInstance(ReceivePurchaseOrderDto, {
       warehouseId,
       receivedDate: '2026-07-10',
-      items: [{ purchaseOrderItemId: warehouseId, quantity: 1200 }],
+      items: [{ purchaseOrderItemId: warehouseId, quantity: 1200, packages: '30+9' }],
     });
     expect(await validate(po, { whitelist: true, forbidNonWhitelisted: true })).toHaveLength(0);
     expect(await validate(receipt, { whitelist: true, forbidNonWhitelisted: true })).toHaveLength(0);
+  });
+  it('refuses a received line without its rolls / bags, which the received note prints', async () => {
+    const id = '11111111-1111-4111-8111-111111111111';
+    const errors = (items: unknown[]) =>
+      validate(plainToInstance(ReceivePurchaseOrderDto, { warehouseId: id, receivedDate: '2026-07-10', items }), { whitelist: true, forbidNonWhitelisted: true });
+    expect(JSON.stringify(await errors([{ purchaseOrderItemId: id, quantity: 1200 }]))).toContain('Enter the number of rolls / bags for every line received');
+    expect(JSON.stringify(await errors([{ purchaseOrderItemId: id, quantity: 1200, packages: 'ten' }]))).toContain('as numbers');
+    expect(await errors([{ purchaseOrderItemId: id, quantity: 1200, packages: '22' }])).toHaveLength(0);
   });
 });
